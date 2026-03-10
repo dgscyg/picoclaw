@@ -369,11 +369,30 @@ func (s *appState) wecomOfficialForm() tview.Primitive {
 	form.AddInputField("WebSocket URL", cfg.WebSocketURL, 128, nil, func(text string) {
 		cfg.WebSocketURL = strings.TrimSpace(text)
 	})
+	thinkingEnabled := cfg.Placeholder.Enabled
+	if cfg.SendThinkingMessage != nil {
+		thinkingEnabled = *cfg.SendThinkingMessage
+	}
+	form.AddCheckbox("Send Thinking", thinkingEnabled, func(checked bool) {
+		cfg.SendThinkingMessage = boolPtr(checked)
+		cfg.Placeholder.Enabled = checked
+	})
+	placeholderText := cfg.Placeholder.Text
+	if strings.TrimSpace(placeholderText) == "" {
+		placeholderText = "Thinking... 💭"
+	}
+	form.AddInputField("Placeholder Text", placeholderText, 128, nil, func(text string) {
+		cfg.Placeholder.Text = text
+	})
 	form.AddInputField("Welcome Message", cfg.WelcomeMessage, 256, nil, func(text string) {
 		cfg.WelcomeMessage = text
 	})
 	addAllowFromField(form, &cfg.AllowFrom)
 	return wrapWithBack(form, s)
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func (s *appState) makeChannelOnEnabled(enabledPtr *bool) func(bool) {

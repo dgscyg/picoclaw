@@ -164,6 +164,21 @@ type wecomOfficialReplyTask struct {
 	finalized   bool
 }
 
+func (c *WeComOfficialChannel) placeholderEnabled() bool {
+	if c.config.SendThinkingMessage != nil {
+		return *c.config.SendThinkingMessage
+	}
+	return c.config.Placeholder.Enabled
+}
+
+func (c *WeComOfficialChannel) placeholderText() string {
+	text := strings.TrimSpace(c.config.Placeholder.Text)
+	if text == "" {
+		return "Thinking... 💭"
+	}
+	return text
+}
+
 // WeComOfficialChannel implements the official WeCom Smart Bot websocket channel.
 // It can receive inbound messages over the official websocket callback stream and
 // send proactive markdown notifications via aibot_send_msg.
@@ -545,7 +560,8 @@ func (c *WeComOfficialChannel) processIncomingMessage(frame wecomOfficialFrame, 
 		"preview":   utils.Truncate(content, 80),
 	})
 
-	c.enqueueReplyTask(chatID, frame.Headers.ReqID)
+	task := c.enqueueReplyTask(chatID, frame.Headers.ReqID)
+	c.maybeSendThinkingPlaceholder(task)
 	c.HandleMessage(c.ctx, peer, msg.MsgID, userID, chatID, content, mediaRefs, metadata, sender)
 }
 
@@ -925,6 +941,29 @@ func (c *WeComOfficialChannel) sendReplyChunk(
 	return nil
 }
 
+func (c *WeComOfficialChannel) maybeSendThinkingPlaceholder(task *wecomOfficialReplyTask) {
+	if task == nil || !c.placeholderEnabled() {
+		return
+	}
+
+	text := c.placeholderText()
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.ctx, wecomOfficialSendTimeout)
+	defer cancel()
+
+	if err := c.sendReplyStream(ctx, task.ReqID, task.StreamID, text, false); err != nil {
+		logger.WarnCF("wecom_official", "Failed to send thinking placeholder", map[string]any{
+			"chat_id":   task.ChatID,
+			"stream_id": task.StreamID,
+			"req_id":    task.ReqID,
+			"error":     err.Error(),
+		})
+	}
+}
+
 func (c *WeComOfficialChannel) sendReplyStream(
 	ctx context.Context,
 	reqID, streamID, content string,
@@ -1020,23 +1059,25 @@ func (c *WeComOfficialChannel) sendCommandWithReqIDAndWait(
 	}
 }
 
-func (c *WeComOfficialChannel) enqueueReplyTask(chatID, reqID string) {
+func (c *WeComOfficialChannel) enqueueReplyTask(chatID, reqID string) *wecomOfficialReplyTask {
 	chatID = strings.TrimSpace(chatID)
 	reqID = strings.TrimSpace(reqID)
 	if chatID == "" || reqID == "" {
-		return
+		return nil
 	}
 
 	c.taskMu.Lock()
 	defer c.taskMu.Unlock()
 
 	c.compactReplyTasksLocked(chatID)
-	c.replyTasks[chatID] = append(c.replyTasks[chatID], &wecomOfficialReplyTask{
+	task := &wecomOfficialReplyTask{
 		ReqID:     reqID,
 		ChatID:    chatID,
 		StreamID:  generateWeComOfficialReqID("stream"),
 		CreatedAt: time.Now(),
-	})
+	}
+	c.replyTasks[chatID] = append(c.replyTasks[chatID], task)
+	return task
 }
 
 func (c *WeComOfficialChannel) activeReplyTask(chatID, reqID string) *wecomOfficialReplyTask {

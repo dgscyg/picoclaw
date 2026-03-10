@@ -27,6 +27,10 @@
       "secret": "YOUR_BOT_SECRET",
       "websocket_url": "wss://openws.work.weixin.qq.com",
       "allow_from": [],
+      "placeholder": {
+        "enabled": true,
+        "text": "Thinking... 💭"
+      },
       "welcome_message": "",
       "reasoning_channel_id": ""
     }
@@ -41,8 +45,13 @@
 | `secret` | string | 是 | 企业微信官方 Smart Bot 的密钥 |
 | `websocket_url` | string | 否 | 官方 WebSocket 地址，默认 `wss://openws.work.weixin.qq.com` |
 | `allow_from` | array | 否 | 允许访问的用户 ID 白名单；空数组表示允许所有用户 |
+| `placeholder.enabled` | bool | 否 | 是否在正式回复前先通过官方 `replyStream` 发送 “Thinking...” 占位流，默认开启 |
+| `placeholder.text` | string | 否 | 占位流文本；为空时默认 `Thinking... 💭` |
 | `welcome_message` | string | 否 | 用户触发 `enter_chat` 事件时发送的欢迎语；留空则不发送 |
 | `reasoning_channel_id` | string | 否 | 将模型思维链路由到指定 channel 的目标 ID |
+
+兼容说明：
+- `sendThinkingMessage` 仍可作为旧插件配置名使用，等价于 `placeholder.enabled`
 
 ## 使用说明
 
@@ -70,6 +79,7 @@ picoclaw gateway
 3. 定时发送 `ping` 心跳。
 4. 在收到文本、图片、文件、混合消息后转入 PicoClaw 的标准 bus 流程。
 5. 对普通消息回复优先走官方 `aibot_respond_msg` 流式回复链路；没有活跃回调上下文时才回退到 `aibot_send_msg` 主动通知。
+6. 如果 `placeholder.enabled=true`，收到消息后会先发一条 `finish=false` 的 “Thinking...” 占位流，后续正式回复会复用同一个 `stream_id` 覆盖占位内容并收尾。
 
 ### 3. 入站消息处理
 
@@ -90,6 +100,7 @@ picoclaw gateway
 
 - 对“刚收到的官方回调消息”，PicoClaw 会优先复用该消息的 `req_id`，通过 `aibot_respond_msg` 发送 `stream` 回复。
 - 对“没有活跃回调上下文的独立通知”，PicoClaw 继续通过官方 `aibot_send_msg` 发送 markdown 消息。
+- 如果开启 `placeholder.enabled`，PicoClaw 会在进入 Agent 处理前先发送一条占位 `stream`；最终回复使用同一 `stream_id` 覆盖占位文本。
 
 这意味着它既能做官方会话内回复，也能做独立主动通知。
 
@@ -125,6 +136,20 @@ picoclaw gateway
 - 检查日志里是否出现 `aibot_respond_msg` 回执错误。
 - 确认这条消息来自当前 WebSocket 回调会话，而不是后台任务补发或独立通知。
 - 如果上游 Agent 只产出一条最终消息，你看到的会是“单条 stream 回复 + 自动 finish 收尾”，而不是 token 级逐字输出。
+
+### 卡片消息怎么处理
+
+- `aibot-node-sdk` 支持 `replyTemplateCard`、`replyStreamWithCard`、`sendMessage(template_card)` 和 `updateTemplateCard`。
+- 类似 [Feishu card 适配](D:/tmp/claw/picoclaw/pkg/channels/feishu/feishu_64.go) 和你提到的 `PR #800` 这种做法，基础“文本转卡片渲染”其实可以在单个 channel 内完成，不一定要先改 bus。
+- PicoClaw 当前的 `wecom_official` 还没有接入模板卡片；现在支持的是文本 `replyStream`、欢迎语文本回复和主动 markdown 通知。
+- 真正需要扩 `bus` / `agent` / `tool` 的，是这些“结构化卡片能力”：
+  - 回调内显式卡片回复：`aibot_respond_msg` + `template_card`
+  - 流式文本 + 卡片组合：`stream_with_template_card`
+  - 卡片交互事件后的更新：`aibot_respond_update_msg`
+  - 主动发送结构化模板卡片：`aibot_send_msg` + `template_card`
+- 也就是说，下一步可以分两层做：
+  - 第一层：像 Feishu 一样，把普通文本输出渲染成 WeCom `template_card`
+  - 第二层：补结构化出站模型，接通 `replyTemplateCard` / `replyStreamWithCard` / `updateTemplateCard`
 
 ### 群里消息太容易触发
 

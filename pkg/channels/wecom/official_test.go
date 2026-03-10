@@ -16,6 +16,8 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
+func boolPtr(v bool) *bool { return &v }
+
 type wecomOfficialTestServer struct {
 	t        *testing.T
 	server   *httptest.Server
@@ -173,10 +175,11 @@ func TestWeComOfficialSend(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
-		Enabled:      true,
-		BotID:        "bot-id",
-		Secret:       "bot-secret",
-		WebSocketURL: server.wsURL,
+		Enabled:             true,
+		BotID:               "bot-id",
+		Secret:              "bot-secret",
+		WebSocketURL:        server.wsURL,
+		SendThinkingMessage: boolPtr(false),
 	}, msgBus)
 	if err != nil {
 		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
@@ -247,10 +250,11 @@ func TestWeComOfficialInboundTextPublishesToBus(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
-		Enabled:      true,
-		BotID:        "bot-id",
-		Secret:       "bot-secret",
-		WebSocketURL: server.wsURL,
+		Enabled:             true,
+		BotID:               "bot-id",
+		Secret:              "bot-secret",
+		WebSocketURL:        server.wsURL,
+		SendThinkingMessage: boolPtr(false),
 	}, msgBus)
 	if err != nil {
 		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
@@ -321,10 +325,11 @@ func TestWeComOfficialReplyUsesCallbackReqID(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
-		Enabled:      true,
-		BotID:        "bot-id",
-		Secret:       "bot-secret",
-		WebSocketURL: server.wsURL,
+		Enabled:             true,
+		BotID:               "bot-id",
+		Secret:              "bot-secret",
+		WebSocketURL:        server.wsURL,
+		SendThinkingMessage: boolPtr(false),
 	}, msgBus)
 	if err != nil {
 		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
@@ -440,10 +445,11 @@ func TestWeComOfficialActiveReplyTaskRequiresReplyTo(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
-		Enabled:      true,
-		BotID:        "bot-id",
-		Secret:       "bot-secret",
-		WebSocketURL: server.wsURL,
+		Enabled:             true,
+		BotID:               "bot-id",
+		Secret:              "bot-secret",
+		WebSocketURL:        server.wsURL,
+		SendThinkingMessage: boolPtr(false),
 	}, msgBus)
 	if err != nil {
 		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
@@ -515,10 +521,11 @@ func TestWeComOfficialReplyAccumulatesStreamContent(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
-		Enabled:      true,
-		BotID:        "bot-id",
-		Secret:       "bot-secret",
-		WebSocketURL: server.wsURL,
+		Enabled:             true,
+		BotID:               "bot-id",
+		Secret:              "bot-secret",
+		WebSocketURL:        server.wsURL,
+		SendThinkingMessage: boolPtr(false),
 	}, msgBus)
 	if err != nil {
 		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
@@ -597,6 +604,83 @@ func TestWeComOfficialReplyAccumulatesStreamContent(t *testing.T) {
 	}
 }
 
+func TestWeComOfficialThinkingPlaceholderUsesConfiguredText(t *testing.T) {
+	server := newWeComOfficialTestServer(t, func(conn *websocket.Conn) {
+		body, err := json.Marshal(map[string]any{
+			"msgid":    "msg-6",
+			"aibotid":  "bot-id",
+			"chattype": "single",
+			"from": map[string]any{
+				"userid": "user-6",
+			},
+			"msgtype": "text",
+			"text": map[string]any{
+				"content": "hello",
+			},
+		})
+		if err != nil {
+			t.Errorf("marshal callback body: %v", err)
+			return
+		}
+		if err := conn.WriteJSON(wecomOfficialFrame{
+			Cmd:     wecomOfficialCmdMessageCallback,
+			Headers: wecomOfficialHeaders{ReqID: "callback-req-6"},
+			Body:    body,
+		}); err != nil {
+			t.Errorf("write callback: %v", err)
+		}
+	})
+	defer server.close()
+
+	msgBus := bus.NewMessageBus()
+	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
+		Enabled:      true,
+		BotID:        "bot-id",
+		Secret:       "bot-secret",
+		WebSocketURL: server.wsURL,
+		Placeholder: config.PlaceholderConfig{
+			Enabled: true,
+			Text:    "正在思考中...",
+		},
+	}, msgBus)
+	if err != nil {
+		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := ch.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = ch.Stop(context.Background()) }()
+
+	server.waitAuth(t)
+
+	reply := server.waitReply(t)
+	if got, want := reply.Cmd, wecomOfficialCmdRespondMessage; got != want {
+		t.Fatalf("placeholder cmd = %q, want %q", got, want)
+	}
+	if got, want := reply.Headers.ReqID, "callback-req-6"; got != want {
+		t.Fatalf("placeholder req_id = %q, want %q", got, want)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(reply.Body, &body); err != nil {
+		t.Fatalf("unmarshal placeholder body: %v", err)
+	}
+	stream, ok := body["stream"].(map[string]any)
+	if !ok {
+		t.Fatalf("placeholder missing stream body: %#v", body)
+	}
+	if got, want := stream["content"], "正在思考中..."; got != want {
+		t.Fatalf("placeholder content = %v, want %v", got, want)
+	}
+	if got, want := stream["finish"], false; got != want {
+		t.Fatalf("placeholder finish = %v, want %v", got, want)
+	}
+}
+
 func TestWeComOfficialWelcomeUsesWelcomeReplyCommand(t *testing.T) {
 	server := newWeComOfficialTestServer(t, func(conn *websocket.Conn) {
 		body, err := json.Marshal(map[string]any{
@@ -626,11 +710,12 @@ func TestWeComOfficialWelcomeUsesWelcomeReplyCommand(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
-		Enabled:        true,
-		BotID:          "bot-id",
-		Secret:         "bot-secret",
-		WebSocketURL:   server.wsURL,
-		WelcomeMessage: "welcome aboard",
+		Enabled:             true,
+		BotID:               "bot-id",
+		Secret:              "bot-secret",
+		WebSocketURL:        server.wsURL,
+		SendThinkingMessage: boolPtr(false),
+		WelcomeMessage:      "welcome aboard",
 	}, msgBus)
 	if err != nil {
 		t.Fatalf("NewWeComOfficialChannel() error = %v", err)

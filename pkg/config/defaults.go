@@ -166,11 +166,15 @@ func DefaultConfig() *Config {
 				WelcomeMessage: "Hello! I'm your AI assistant. How can I help you today?",
 			},
 			WeComOfficial: WeComOfficialConfig{
-				Enabled:        false,
-				BotID:          "",
-				Secret:         "",
-				WebSocketURL:   "wss://openws.work.weixin.qq.com",
-				AllowFrom:      FlexibleStringSlice{},
+				Enabled:      false,
+				BotID:        "",
+				Secret:       "",
+				WebSocketURL: "wss://openws.work.weixin.qq.com",
+				AllowFrom:    FlexibleStringSlice{},
+				Placeholder: PlaceholderConfig{
+					Enabled: true,
+					Text:    "Thinking... 💭",
+				},
 				WelcomeMessage: "",
 			},
 			Pico: PicoConfig{

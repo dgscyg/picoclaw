@@ -419,14 +419,16 @@ type WeComAIBotConfig struct {
 }
 
 type WeComOfficialConfig struct {
-	Enabled            bool                `json:"enabled"              env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_ENABLED"`
-	BotID              string              `json:"bot_id"               env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_BOT_ID"`
-	Secret             string              `json:"secret"               env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_SECRET"`
-	WebSocketURL       string              `json:"websocket_url"        env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_WEBSOCKET_URL"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"           env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_ALLOW_FROM"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	WelcomeMessage     string              `json:"welcome_message,omitempty" env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_WELCOME_MESSAGE"`
-	ReasoningChannelID string              `json:"reasoning_channel_id" env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_REASONING_CHANNEL_ID"`
+	Enabled             bool                `json:"enabled"              env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_ENABLED"`
+	BotID               string              `json:"bot_id"               env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_BOT_ID"`
+	Secret              string              `json:"secret"               env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_SECRET"`
+	WebSocketURL        string              `json:"websocket_url"        env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_WEBSOCKET_URL"`
+	AllowFrom           FlexibleStringSlice `json:"allow_from"           env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_ALLOW_FROM"`
+	GroupTrigger        GroupTriggerConfig  `json:"group_trigger,omitempty"`
+	SendThinkingMessage *bool               `json:"sendThinkingMessage,omitempty"`
+	Placeholder         PlaceholderConfig   `json:"placeholder,omitempty"`
+	WelcomeMessage      string              `json:"welcome_message,omitempty" env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_WELCOME_MESSAGE"`
+	ReasoningChannelID  string              `json:"reasoning_channel_id" env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_REASONING_CHANNEL_ID"`
 }
 
 type PicoConfig struct {

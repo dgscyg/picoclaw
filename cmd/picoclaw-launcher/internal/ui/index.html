@@ -1057,6 +1057,8 @@ const channelSchemas = {
             { key: 'bot_id', label: 'Bot ID', type: 'text', placeholder: 'Official WeCom bot ID' },
             { key: 'secret', label: 'Secret', type: 'password', placeholder: 'Official WeCom bot secret' },
             { key: 'websocket_url', label: 'WebSocket URL', type: 'text', placeholder: 'wss://openws.work.weixin.qq.com' },
+            { key: 'sendThinkingMessage', label: 'Send Thinking Message', type: 'toggle' },
+            { key: 'placeholder_text', label: 'Placeholder Text', type: 'text', placeholder: 'Thinking... 💭' },
             { key: 'welcome_message', label: 'Welcome Message', type: 'text', placeholder: 'Optional welcome text' },
         ]
     },
@@ -1462,7 +1464,17 @@ function renderChannelForm(chKey) {
             html += `<div class="array-add" onclick="addArrayRow(this.parentElement)">${t('ch.addItem')}</div>`;
             html += `</div></div>`;
         } else {
-            const val = chData[f.key] !== undefined && chData[f.key] !== null ? chData[f.key] : '';
+            let val = chData[f.key] !== undefined && chData[f.key] !== null ? chData[f.key] : '';
+            if (chKey === 'wecom_official' && f.key === 'sendThinkingMessage') {
+                if (chData.sendThinkingMessage !== undefined && chData.sendThinkingMessage !== null) {
+                    val = chData.sendThinkingMessage;
+                } else {
+                    val = !!(chData.placeholder && chData.placeholder.enabled);
+                }
+            }
+            if (chKey === 'wecom_official' && f.key === 'placeholder_text') {
+                val = (chData.placeholder && chData.placeholder.text) ? chData.placeholder.text : '';
+            }
             html += `<div class="form-group">`;
             html += `<label class="form-label">${label}</label>`;
             html += `<input class="form-input ${f.type === 'number' ? 'form-input-number' : ''}" `;
@@ -1523,7 +1535,16 @@ function saveChannelForm(chKey) {
     schema.fields.forEach(f => {
         if (f.type === 'toggle') {
             const el = form.querySelector(`[data-chfield="${f.key}"].toggle`);
-            if (el) chObj[f.key] = el.classList.contains('on');
+            if (el) {
+                const checked = el.classList.contains('on');
+                if (chKey === 'wecom_official' && f.key === 'sendThinkingMessage') {
+                    chObj.sendThinkingMessage = checked;
+                    chObj.placeholder = chObj.placeholder || {};
+                    chObj.placeholder.enabled = checked;
+                } else {
+                    chObj[f.key] = checked;
+                }
+            }
         } else if (f.type === 'array') {
             const container = form.querySelector(`.array-editor[data-chfield="${f.key}"]`);
             if (container) {
@@ -1542,7 +1563,12 @@ function saveChannelForm(chKey) {
                     val = parseInt(val, 10);
                     if (isNaN(val)) val = 0;
                 }
-                chObj[f.key] = val === '' ? (f.type === 'number' ? 0 : '') : val;
+                if (chKey === 'wecom_official' && f.key === 'placeholder_text') {
+                    chObj.placeholder = chObj.placeholder || {};
+                    chObj.placeholder.text = val === '' ? 'Thinking... 💭' : val;
+                } else {
+                    chObj[f.key] = val === '' ? (f.type === 'number' ? 0 : '') : val;
+                }
             }
         }
     });

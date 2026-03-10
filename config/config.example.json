@@ -190,6 +190,10 @@
       "secret": "YOUR_BOT_SECRET",
       "websocket_url": "wss://openws.work.weixin.qq.com",
       "allow_from": [],
+      "placeholder": {
+        "enabled": true,
+        "text": "Thinking... 💭"
+      },
       "welcome_message": "",
       "reasoning_channel_id": ""
     },
