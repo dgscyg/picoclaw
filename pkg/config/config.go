@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 
@@ -234,6 +235,7 @@ type ChannelsConfig struct {
 	WeComOfficial WeComOfficialConfig `json:"wecom_official"`
 	Pico          PicoConfig          `json:"pico"`
 	IRC           IRCConfig           `json:"irc"`
+	QClaw         QClawConfig         `json:"qclaw"`
 }
 
 // GroupTriggerConfig controls when the bot responds in group chats.
@@ -468,6 +470,41 @@ type IRCConfig struct {
 	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
 	Typing             TypingConfig        `json:"typing,omitempty"`
 	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"PICOCLAW_CHANNELS_IRC_REASONING_CHANNEL_ID"`
+}
+
+// QClawConfig configures the QClaw channel for WeChat service account integration.
+// QClaw uses the AGP (Agent Gateway Protocol) over WebSocket for bidirectional
+// communication with the QClaw backend.
+type QClawConfig struct {
+	Enabled            bool                `json:"enabled"                env:"PICOCLAW_CHANNELS_QCLAW_ENABLED"`
+	Token              string              `json:"token"                  env:"PICOCLAW_CHANNELS_QCLAW_TOKEN"`
+	WebSocketURL       string              `json:"websocket_url"          env:"PICOCLAW_CHANNELS_QCLAW_WEBSOCKET_URL"`
+	GUID               string              `json:"guid"                   env:"PICOCLAW_CHANNELS_QCLAW_GUID"`
+	UserID             string              `json:"user_id"                env:"PICOCLAW_CHANNELS_QCLAW_USER_ID"`
+	Environment        string              `json:"environment"            env:"PICOCLAW_CHANNELS_QCLAW_ENVIRONMENT"`
+	AuthStatePath      string              `json:"auth_state_path"        env:"PICOCLAW_CHANNELS_QCLAW_AUTH_STATE_PATH"`
+	BypassInvite       bool                `json:"bypass_invite"          env:"PICOCLAW_CHANNELS_QCLAW_BYPASS_INVITE"`
+	AllowFrom          FlexibleStringSlice `json:"allow_from"             env:"PICOCLAW_CHANNELS_QCLAW_ALLOW_FROM"`
+	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
+	Placeholder        PlaceholderConfig   `json:"placeholder,omitempty"`
+	ReasoningChannelID string              `json:"reasoning_channel_id"   env:"PICOCLAW_CHANNELS_QCLAW_REASONING_CHANNEL_ID"`
+	HeartbeatInterval  time.Duration       `json:"heartbeat_interval"     env:"PICOCLAW_CHANNELS_QCLAW_HEARTBEAT_INTERVAL"`
+	ReconnectInterval  time.Duration       `json:"reconnect_interval"     env:"PICOCLAW_CHANNELS_QCLAW_RECONNECT_INTERVAL"`
+	MaxReconnects      int                 `json:"max_reconnects"         env:"PICOCLAW_CHANNELS_QCLAW_MAX_RECONNECTS"`
+	Accounts           map[string]QClawAccountConfig `json:"accounts,omitempty"`
+}
+
+// QClawAccountConfig configures a single QClaw account.
+// Account-specific configurations override global QClawConfig settings.
+type QClawAccountConfig struct {
+	Token              string              `json:"token"`
+	GUID               string              `json:"guid,omitempty"`
+	UserID             string              `json:"user_id,omitempty"`
+	WebSocketURL       string              `json:"websocket_url,omitempty"`
+	AuthStatePath      string              `json:"auth_state_path,omitempty"`
+	AllowFrom          FlexibleStringSlice `json:"allow_from,omitempty"`
+	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
+	ReasoningChannelID string              `json:"reasoning_channel_id,omitempty"`
 }
 
 type HeartbeatConfig struct {
