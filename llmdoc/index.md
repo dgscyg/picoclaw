@@ -20,7 +20,10 @@ Step-by-step operational instructions answering "How do I do X?"
 - [how-to-configure-scheduled-tasks.md](guides/how-to-configure-scheduled-tasks.md) - Configure cron jobs and heartbeat tasks: enable/disable services, create jobs via agent conversation, manage existing jobs, and verify configuration.
 - [how-to-configure-session.md](guides/how-to-configure-session.md) - Configure session persistence, history compression thresholds, model routing with light/heavy selection, workspace state persistence, and session key patterns.
 - [how-to-extend-agent.md](guides/how-to-extend-agent.md) - Extend agent behavior: add new tools, customize context building, configure fallback providers, add memory types, and custom agent routing.
+<<<<<<< Updated upstream
 - [how-to-configure-memory.md](guides/how-to-configure-memory.md) - Configure memory backends: file-based storage vs MuninnDB cognitive database, environment variables, fallback behavior, and CLI commands.
+=======
+>>>>>>> Stashed changes
 
 ## Architecture
 
@@ -34,7 +37,10 @@ How the system is built - the "LLM Retrieval Map" answering "How does it work?"
 - [provider-system.md](architecture/provider-system.md) - LLM provider abstraction: factory pattern, protocol prefix design, OpenAI-compatible abstraction, fallback chain with cooldown tracking, error classification, and Anthropic extended thinking support.
 - [session-bus-system.md](architecture/session-bus-system.md) - Message routing and conversation persistence: three-channel MessageBus design, SessionManager with atomic JSON persistence, StateManager for workspace state, history compression (proactive/reactive), and CJK-aware token estimation.
 - [tool-system.md](architecture/tool-system.md) - Extensible tool execution framework: Tool interface, ToolRegistry with context injection, dual-output ToolResult (ForLLM/ForUser), RunToolLoop iteration, sandbox abstraction, shell safety patterns, and MCP integration.
+<<<<<<< Updated upstream
 - [memory-system.md](architecture/memory-system.md) - Memory backend abstraction, file and MuninnDB implementations, fallback behavior, and prompt/tool integration data flow.
+=======
+>>>>>>> Stashed changes
 
 ## Reference
 
