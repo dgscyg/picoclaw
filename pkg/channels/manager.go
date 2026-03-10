@@ -64,6 +64,7 @@ var channelRateConfig = map[string]float64{
 	"matrix":   2,
 	"line":     10,
 	"irc":      2,
+	"qclaw":    10,
 }
 
 type channelWorker struct {

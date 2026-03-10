@@ -20,6 +20,7 @@ import (
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal/memory"
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal/migrate"
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal/onboard"
+	"github.com/sipeed/picoclaw/cmd/picoclaw/internal/qclaw"
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal/skills"
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal/status"
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal/version"
@@ -45,6 +46,7 @@ func NewPicoclawCommand() *cobra.Command {
 		migrate.NewMigrateCommand(),
 		skills.NewSkillsCommand(),
 		version.NewVersionCommand(),
+		qclaw.NewQClawCommand(),
 	)
 
 	return cmd
