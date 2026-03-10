@@ -41,6 +41,16 @@ func DefaultConfig() *Config {
 		Session: SessionConfig{
 			DMScope: "per-channel-peer",
 		},
+		Memory: MemoryConfig{
+			Provider: MemoryProviderFile,
+			File: &FileMemoryConfig{
+				Workspace: filepath.Join(workspacePath, "memory"),
+			},
+			MuninnDB: &MuninnDBConfig{
+				Vault:   DefaultMemoryVault,
+				Timeout: DefaultMemoryTimeout,
+			},
+		},
 		Channels: ChannelsConfig{
 			WhatsApp: WhatsAppConfig{
 				Enabled:          false,

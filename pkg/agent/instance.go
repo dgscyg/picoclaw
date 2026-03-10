@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
@@ -69,6 +70,8 @@ func NewAgentInstance(
 
 	toolsRegistry := tools.NewToolRegistry()
 
+	memoryProvider := newMemoryProvider(cfg, workspace)
+
 	if cfg.Tools.IsToolEnabled("read_file") {
 		toolsRegistry.Register(tools.NewReadFileTool(workspace, readRestrict, allowReadPaths))
 	}
@@ -96,7 +99,7 @@ func NewAgentInstance(
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
 
-	contextBuilder := NewContextBuilder(workspace)
+	contextBuilder := NewContextBuilderWithMemory(workspace, memoryProvider)
 
 	agentID := routing.DefaultAgentID
 	agentName := ""
@@ -260,6 +263,58 @@ func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentD
 		return agentCfg.Model.Fallbacks
 	}
 	return defaults.ModelFallbacks
+}
+
+func newMemoryProvider(cfg *config.Config, workspace string) MemoryProvider {
+	if cfg == nil {
+		logger.InfoCF("agent", "Initialized memory backend", map[string]any{
+			"provider":  config.MemoryProviderFile,
+			"workspace": workspace,
+		})
+		return NewFileMemoryStore(workspace)
+	}
+
+	providerName := strings.TrimSpace(cfg.Memory.Provider)
+	if providerName == "" {
+		providerName = config.MemoryProviderFile
+	}
+
+	switch providerName {
+	case config.MemoryProviderMuninnDB:
+		store, err := NewMuninnDBMemoryStore(cfg.Memory.MuninnDB, workspace)
+		if err != nil {
+			logger.WarnCF("agent", "Failed to initialize MuninnDB memory backend, falling back to file memory", map[string]any{
+				"provider":  providerName,
+				"workspace": workspace,
+				"error":     err.Error(),
+			})
+			logger.InfoCF("agent", "Initialized memory backend", map[string]any{
+				"provider":      config.MemoryProviderFile,
+				"workspace":     workspace,
+				"fallback_from": providerName,
+			})
+			return NewFileMemoryStore(workspace)
+		}
+		logger.InfoCF("agent", "Initialized memory backend", map[string]any{
+			"provider":  providerName,
+			"workspace": workspace,
+		})
+		return store
+	case "", config.MemoryProviderFile:
+		fallthrough
+	default:
+		if providerName != config.MemoryProviderFile {
+			logger.WarnCF("agent", "Unknown memory backend, falling back to file memory", map[string]any{
+				"provider":  providerName,
+				"workspace": workspace,
+			})
+		}
+		logger.InfoCF("agent", "Initialized memory backend", map[string]any{
+			"provider":  config.MemoryProviderFile,
+			"workspace": workspace,
+		})
+		return NewFileMemoryStore(workspace)
+	}
 }
 
 func compilePatterns(patterns []string) []*regexp.Regexp {

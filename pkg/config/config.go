@@ -51,6 +51,7 @@ type Config struct {
 	Agents    AgentsConfig    `json:"agents"`
 	Bindings  []AgentBinding  `json:"bindings,omitempty"`
 	Session   SessionConfig   `json:"session,omitempty"`
+	Memory    MemoryConfig    `json:"memory,omitempty"`
 	Channels  ChannelsConfig  `json:"channels"`
 	Providers ProvidersConfig `json:"providers,omitempty"`
 	ModelList []ModelConfig   `json:"model_list"` // New model-centric provider configuration
@@ -787,6 +788,9 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.Memory.ApplyDefaults()
+	cfg.Memory.ExpandEnvVars()
+
 	// Migrate legacy channel config fields to new unified structures
 	cfg.migrateChannelConfigs()
 
@@ -797,6 +801,9 @@ func LoadConfig(path string) (*Config, error) {
 
 	// Validate model_list for uniqueness and required fields
 	if err := cfg.ValidateModelList(); err != nil {
+		return nil, err
+	}
+	if err := cfg.Memory.Validate(); err != nil {
 		return nil, err
 	}
 
