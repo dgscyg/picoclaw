@@ -12,21 +12,88 @@
 
 ### 从源码编译
 
+#### Linux/macOS
+
 ```bash
 # 克隆仓库
-git clone https://github.com/your-org/muninndb.git
+git clone https://github.com/scrypster/muninndb.git
 cd muninndb
 
-# 编译
+# 编译（需要 CGO，确保安装了 C 编译器）
 go build -o muninn ./cmd/muninn
 
 # 安装到系统路径
 sudo mv muninn /usr/local/bin/
 ```
 
+#### Windows
+
+**重要提示**: MuninnDB 依赖 ONNX Runtime（CGO），需要额外配置。
+
+**方法一：一键安装脚本（推荐）**
+
+在 **PowerShell** 中运行：
+
+```powershell
+# 以管理员身份运行 PowerShell，然后执行：
+irm https://muninndb.com/install.ps1 | iex
+
+# 或者从源码目录运行：
+cd F:\temp\claw\muninndb
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+安装完成后，`muninn` 会被安装到 `%LOCALAPPDATA%\muninn\` 目录。
+
+**方法二：下载预编译二进制**
+
+从 [Releases](https://github.com/scrypster/muninndb/releases) 页面下载 Windows 版本：
+1. 下载 `muninn_vX.X.X_windows_amd64.zip`
+2. 解压到任意目录（如 `C:\Program Files\muninn\`）
+3. 将该目录添加到系统 PATH
+
+**方法三：从源码编译**
+
+> ⚠️ 注意：编译需要 CGO 和 C 编译器，过程较为复杂。
+
+1. 安装 Visual Studio Build Tools 或 MinGW-w64
+
+2. 安装 ONNX Runtime 开发包：
+   ```powershell
+   # 下载 ONNX Runtime
+   Invoke-WebRequest -Uri "https://github.com/microsoft/onnxruntime/releases/download/v1.17.0/onnxruntime-win-x64-1.17.0.zip" -OutFile "onnxruntime.zip"
+   Expand-Archive onnxruntime.zip -DestinationPath C:\onnxruntime
+   ```
+
+3. 设置环境变量（PowerShell）：
+   ```powershell
+   $env:CGO_ENABLED = "1"
+   $env:CC = "gcc"  # 或 clang
+   $env:PKG_CONFIG_PATH = "C:\onnxruntime\lib\pkgconfig"
+   ```
+
+4. 编译：
+   ```powershell
+   cd F:\temp\claw\muninndb
+   go build -o muninn.exe ./cmd/muninn
+   ```
+
+5. 复制 ONNX Runtime DLL：
+   ```powershell
+   Copy-Item C:\onnxruntime\lib\onnxruntime.dll .
+   ```
+
+**常见问题**：
+
+| 问题 | 解决方案 |
+|------|----------|
+| "不是有效应用程序" | 1. 使用 PowerShell/CMD 而非 Git Bash<br>2. 确保已下载 onnxruntime.dll<br>3. 安装 [VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
+| 找不到 onnxruntime.dll | 将 DLL 复制到 muninn.exe 同目录 |
+| CGO 编译失败 | 安装 Visual Studio Build Tools，重启终端后重试 |
+
 ### 使用预编译二进制
 
-从 [Releases](https://github.com/your-org/muninndb/releases) 页面下载对应平台的二进制文件。
+从 [Releases](https://github.com/scrypster/muninndb/releases) 页面下载对应平台的二进制文件。
 
 ## 第二步：初始化 MuninnDB
 
