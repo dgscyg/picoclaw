@@ -9,6 +9,99 @@ import (
 	"testing"
 )
 
+func TestMemoryConfig_Defaults(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.Memory.Provider != MemoryProviderFile {
+		t.Fatalf("Memory.Provider = %q, want %q", cfg.Memory.Provider, MemoryProviderFile)
+	}
+	if cfg.Memory.File == nil {
+		t.Fatal("Memory.File should not be nil")
+	}
+	if cfg.Memory.File.Workspace == "" {
+		t.Fatal("Memory.File.Workspace should not be empty")
+	}
+	if cfg.Memory.MuninnDB == nil {
+		t.Fatal("Memory.MuninnDB should not be nil")
+	}
+	if cfg.Memory.MuninnDB.Vault != DefaultMemoryVault {
+		t.Fatalf("Memory.MuninnDB.Vault = %q, want %q", cfg.Memory.MuninnDB.Vault, DefaultMemoryVault)
+	}
+	if cfg.Memory.MuninnDB.Timeout != DefaultMemoryTimeout {
+		t.Fatalf("Memory.MuninnDB.Timeout = %q, want %q", cfg.Memory.MuninnDB.Timeout, DefaultMemoryTimeout)
+	}
+}
+
+func TestLoadConfig_MemoryEnvExpansion(t *testing.T) {
+	t.Setenv("MUNINNDB_ENDPOINT", "http://localhost:8475")
+	t.Setenv("MUNINNDB_VAULT", "team")
+	t.Setenv("MUNINNDB_API_KEY", "secret-key")
+	jsonData := `{
+		"memory": {
+			"provider": "muninndb",
+			"muninndb": {
+				"endpoint": "${MUNINNDB_ENDPOINT}",
+				"vault": "${MUNINNDB_VAULT}",
+				"api_key": "${MUNINNDB_API_KEY}"
+			}
+		}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(jsonData), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if cfg.Memory.Provider != MemoryProviderMuninnDB {
+		t.Fatalf("Memory.Provider = %q, want %q", cfg.Memory.Provider, MemoryProviderMuninnDB)
+	}
+	if cfg.Memory.MuninnDB == nil {
+		t.Fatal("Memory.MuninnDB should not be nil")
+	}
+	if cfg.Memory.MuninnDB.Endpoint != "http://localhost:8475" {
+		t.Fatalf("Endpoint = %q", cfg.Memory.MuninnDB.Endpoint)
+	}
+	if cfg.Memory.MuninnDB.Vault != "team" {
+		t.Fatalf("Vault = %q", cfg.Memory.MuninnDB.Vault)
+	}
+	if cfg.Memory.MuninnDB.APIKey != "secret-key" {
+		t.Fatalf("APIKey = %q", cfg.Memory.MuninnDB.APIKey)
+	}
+	if cfg.Memory.MuninnDB.Timeout != DefaultMemoryTimeout {
+		t.Fatalf("Timeout = %q, want %q", cfg.Memory.MuninnDB.Timeout, DefaultMemoryTimeout)
+	}
+}
+
+func TestLoadConfig_MemoryValidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	jsonData := `{
+		"memory": {
+			"provider": "muninndb",
+			"muninndb": {
+				"vault": "default"
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(jsonData), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("LoadConfig should fail when endpoint is missing")
+	}
+	if !strings.Contains(err.Error(), "memory.muninndb.endpoint") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAgentModelConfig_UnmarshalString(t *testing.T) {
 	var m AgentModelConfig
 	if err := json.Unmarshal([]byte(`"gpt-4"`), &m); err != nil {
