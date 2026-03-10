@@ -82,6 +82,10 @@ func (cb *ContextBuilder) getIdentity() string {
 
 	// Check if using MuninnDB memory provider
 	_, isMuninnDB := cb.memory.(*MuninnDBMemoryStore)
+	logger.InfoCF("agent", "Building system prompt identity", map[string]any{
+		"is_muninndb": isMuninnDB,
+		"memory_type": fmt.Sprintf("%T", cb.memory),
+	})
 
 	var memoryInstructions string
 	if isMuninnDB {
