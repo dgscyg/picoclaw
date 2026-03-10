@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/muninndb"
@@ -73,15 +72,11 @@ func (ms *MuninnDBMemoryStore) Recall(ctx context.Context, query string, limit i
 		limit = 5
 	}
 
-	resp, err := ms.client.Activate(ctx, muninndb.ActivateRequest{
-		Query: strings.TrimSpace(query),
-		Limit: limit,
-		Mode:  "semantic",
-	})
+	resp, err := ms.client.Activate(ctx, strings.TrimSpace(query), limit)
 	if err != nil {
 		if ms.fallback != nil {
 			logger.WarnCF("agent", "MuninnDB recall failed, falling back to file memory", map[string]any{
-				"vault": vaultOrUnknown(ms.vault),
+				"vault": ms.vault,
 				"error": err.Error(),
 			})
 			return ms.fallback.Recall(ctx, query, limit)
@@ -89,16 +84,13 @@ func (ms *MuninnDBMemoryStore) Recall(ctx context.Context, query string, limit i
 		return nil, fmt.Errorf("muninndb recall: %w", err)
 	}
 
-	entries := make([]string, 0, len(resp.Engrams))
-	for _, engram := range resp.Engrams {
-		content := formatEngramForMemory(engram)
+	entries := make([]string, 0, len(resp.Activations))
+	for _, item := range resp.Activations {
+		content := formatActivationForMemory(item)
 		if content == "" {
 			continue
 		}
 		entries = append(entries, content)
-		if len(entries) >= limit {
-			break
-		}
 	}
 
 	return &tools.MemoryQueryResult{Entries: entries}, nil
@@ -115,22 +107,19 @@ func (ms *MuninnDBMemoryStore) Memorize(ctx context.Context, content string, opt
 		return nil
 	}
 
-	engramID, err := newEngramID()
+	tags := memoryTags(opts)
+	concept := ""
+	if opts.LongTerm {
+		concept = "Long-term Memory"
+	} else {
+		concept = "Daily Note"
+	}
+
+	_, err := ms.client.WriteEngram(ctx, content, tags, concept)
 	if err != nil {
-		return fmt.Errorf("generate engram id: %w", err)
-	}
-
-	engram := muninndb.Engram{
-		ID:        engramID,
-		Content:   content,
-		CreatedAt: time.Now().UTC(),
-		Tags:      memoryTags(opts),
-	}
-
-	if err := ms.client.WriteEngram(ctx, engram); err != nil {
 		if ms.fallback != nil {
 			logger.WarnCF("agent", "MuninnDB memorize failed, falling back to file memory", map[string]any{
-				"vault": vaultOrUnknown(ms.vault),
+				"vault": ms.vault,
 				"error": err.Error(),
 			})
 			return ms.fallback.Memorize(ctx, content, opts)
@@ -177,36 +166,20 @@ func (ms *MuninnDBMemoryStore) Close() error {
 	return nil
 }
 
-func formatEngramForMemory(engram muninndb.Engram) string {
-	content := strings.TrimSpace(engram.Content)
-	if content == "" {
-		content = strings.TrimSpace(engram.Summary)
-	}
+func formatActivationForMemory(item muninndb.ActivationItem) string {
+	content := strings.TrimSpace(item.Content)
 	if content == "" {
 		return ""
 	}
 
 	parts := []string{content}
-	if len(engram.Tags) > 0 {
-		parts = append(parts, "Tags: "+strings.Join(engram.Tags, ", "))
+	if item.Concept != "" {
+		parts = append(parts, "Concept: "+item.Concept)
 	}
-	if engram.Concept != "" {
-		parts = append(parts, "Concept: "+engram.Concept)
-	}
-	if len(engram.KeyPoints) > 0 {
-		parts = append(parts, "Key Points: "+strings.Join(engram.KeyPoints, "; "))
+	if item.Score > 0 {
+		parts = append(parts, fmt.Sprintf("Relevance: %.2f", item.Score))
 	}
 	return strings.Join(parts, "\n")
-}
-
-func newEngramID() ([16]byte, error) {
-	id, err := uuid.NewRandom()
-	if err != nil {
-		return [16]byte{}, err
-	}
-	var out [16]byte
-	copy(out[:], id[:])
-	return out, nil
 }
 
 func memoryTags(opts tools.MemoryWriteOptions) []string {
@@ -214,14 +187,6 @@ func memoryTags(opts tools.MemoryWriteOptions) []string {
 		return []string{"long-term"}
 	}
 	return []string{"daily-note"}
-}
-
-func vaultOrUnknown(vault string) string {
-	vault = strings.TrimSpace(vault)
-	if vault == "" {
-		return "unknown"
-	}
-	return vault
 }
 
 var _ MemoryProvider = (*MuninnDBMemoryStore)(nil)

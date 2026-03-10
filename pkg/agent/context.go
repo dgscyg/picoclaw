@@ -80,15 +80,18 @@ func NewContextBuilderWithMemory(workspace string, memory MemoryProvider) *Conte
 func (cb *ContextBuilder) getIdentity() string {
 	workspacePath, _ := filepath.Abs(filepath.Join(cb.workspace))
 
-	return fmt.Sprintf(`# picoclaw 🦞
+	// Check if using MuninnDB memory provider
+	_, isMuninnDB := cb.memory.(*MuninnDBMemoryStore)
+	logger.InfoCF("agent", "Building system prompt identity", map[string]any{
+		"is_muninndb": isMuninnDB,
+		"memory_type": fmt.Sprintf("%T", cb.memory),
+	})
 
-You are picoclaw, a helpful AI assistant.
-
-## Workspace
-Your workspace is at: %s
-- Memory: %s/memory/MEMORY.md
-- Daily Notes: %s/memory/YYYYMM/YYYYMMDD.md
-- Skills: %s/skills/{skill-name}/SKILL.md
+	var memoryInstructions string
+	if isMuninnDB {
+		memoryInstructions = `## Workspace
+Your workspace is at: ` + workspacePath + `
+- Skills: ` + workspacePath + `/skills/{skill-name}/SKILL.md
 
 ## Important Rules
 
@@ -96,10 +99,35 @@ Your workspace is at: %s
 
 2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
 
-3. **Memory** - When interacting with me if something seems memorable, update %s/memory/MEMORY.md
+3. **Memory** - When you need to store or recall information, use the memory tools:
+   - Use ` + "`memory_store`" + ` to store important information (user preferences, facts to remember, decisions made, etc.)
+   - Use ` + "`memory_recall`" + ` to search and retrieve previously stored memories
+   - Always prefer using these memory tools over writing to files
 
-4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.`,
-		workspacePath, workspacePath, workspacePath, workspacePath, workspacePath)
+4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.`
+	} else {
+		memoryInstructions = `## Workspace
+Your workspace is at: ` + workspacePath + `
+- Memory: ` + workspacePath + `/memory/MEMORY.md
+- Daily Notes: ` + workspacePath + `/memory/YYYYMM/YYYYMMDD.md
+- Skills: ` + workspacePath + `/skills/{skill-name}/SKILL.md
+
+## Important Rules
+
+1. **ALWAYS use tools** - When you need to perform an action (schedule reminders, send messages, execute commands, etc.), you MUST call the appropriate tool. Do NOT just say you'll do it or pretend to do it.
+
+2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
+
+3. **Memory** - When interacting with me if something seems memorable, update ` + workspacePath + `/memory/MEMORY.md
+
+4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.`
+	}
+
+	return `# picoclaw 🦞
+
+You are picoclaw, a helpful AI assistant.
+
+` + memoryInstructions
 }
 
 func (cb *ContextBuilder) BuildSystemPrompt() string {
@@ -196,13 +224,17 @@ func (cb *ContextBuilder) InvalidateCache() {
 // invalidation (bootstrap files + memory). Skill roots are handled separately
 // because they require both directory-level and recursive file-level checks.
 func (cb *ContextBuilder) sourcePaths() []string {
-	return []string{
+	paths := []string{
 		filepath.Join(cb.workspace, "AGENTS.md"),
 		filepath.Join(cb.workspace, "SOUL.md"),
 		filepath.Join(cb.workspace, "USER.md"),
 		filepath.Join(cb.workspace, "IDENTITY.md"),
-		filepath.Join(cb.workspace, "memory", "MEMORY.md"),
 	}
+	// Only track MEMORY.md for file-based memory provider
+	if _, isMuninnDB := cb.memory.(*MuninnDBMemoryStore); !isMuninnDB {
+		paths = append(paths, filepath.Join(cb.workspace, "memory", "MEMORY.md"))
+	}
+	return paths
 }
 
 // skillRoots returns all skill root directories that can affect
