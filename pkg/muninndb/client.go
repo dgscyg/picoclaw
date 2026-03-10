@@ -44,29 +44,55 @@ func NewClientWithHTTPClient(httpClient *http.Client, endpoint, vault, apiKey st
 	}
 }
 
-func (c *Client) Activate(ctx context.Context, req ActivateRequest) (*ActivateResponse, error) {
-	if req.Limit == 0 {
-		req.Limit = 10
+// Activate performs a semantic memory activation query.
+// The query string is converted to Context for MuninnDB API.
+func (c *Client) Activate(ctx context.Context, query string, limit int) (*ActivateResponse, error) {
+	if limit == 0 {
+		limit = 10
 	}
-	if req.Mode == "" {
-		req.Mode = "semantic"
+
+	req := ActivateRequest{
+		Vault:      c.vault,
+		Context:    []string{query},
+		MaxResults: limit,
 	}
 
 	var resp ActivateResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/vault/"+c.vault+"/activate", req, &resp); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, "/api/activate", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-func (c *Client) WriteEngram(ctx context.Context, engram Engram) error {
-	return c.doJSON(ctx, http.MethodPost, "/api/v1/vault/"+c.vault+"/engrams", engram, nil)
+// WriteEngram writes a new memory engram to MuninnDB.
+func (c *Client) WriteEngram(ctx context.Context, content string, tags []string, concept string) (*WriteResponse, error) {
+	req := WriteRequest{
+		Vault:   c.vault,
+		Content: content,
+		Tags:    tags,
+		Concept: concept,
+	}
+
+	var resp WriteResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/api/engrams", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// Health checks if MuninnDB is healthy.
+func (c *Client) Health(ctx context.Context) error {
+	return c.doJSON(ctx, http.MethodGet, "/api/health", nil, nil)
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, payload any, out any) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
+	var body []byte
+	var err error
+	if payload != nil {
+		body, err = json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal request: %w", err)
+		}
 	}
 
 	url := c.endpoint + path
@@ -78,12 +104,21 @@ func (c *Client) doJSON(ctx context.Context, method, path string, payload any, o
 			}
 		}
 
-		req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 		if err != nil {
 			return fmt.Errorf("create request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-		req.Header.Set("Content-Type", "application/json")
+
+		if c.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
