@@ -101,9 +101,8 @@ func gatewayCmd(debug bool) error {
 	)
 	heartbeatService.SetBus(msgBus)
 	heartbeatService.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
-		// Use cli:direct as fallback if no valid channel
 		if channel == "" || chatID == "" {
-			channel, chatID = "cli", "direct"
+			return tools.SilentResult("Heartbeat skipped: no active external channel")
 		}
 		// Use ProcessHeartbeat - no session history, each heartbeat is independent
 		var response string

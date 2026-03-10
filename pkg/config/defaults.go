@@ -165,6 +165,14 @@ func DefaultConfig() *Config {
 				MaxSteps:       10,
 				WelcomeMessage: "Hello! I'm your AI assistant. How can I help you today?",
 			},
+			WeComOfficial: WeComOfficialConfig{
+				Enabled:        false,
+				BotID:          "",
+				Secret:         "",
+				WebSocketURL:   "wss://openws.work.weixin.qq.com",
+				AllowFrom:      FlexibleStringSlice{},
+				WelcomeMessage: "",
+			},
 			Pico: PicoConfig{
 				Enabled:        false,
 				Token:          "",

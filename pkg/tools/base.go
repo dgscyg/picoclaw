@@ -23,12 +23,20 @@ type toolCtxKey struct{ name string }
 var (
 	ctxKeyChannel = &toolCtxKey{"channel"}
 	ctxKeyChatID  = &toolCtxKey{"chatID"}
+	ctxKeyReplyTo = &toolCtxKey{"replyTo"}
 )
 
 // WithToolContext returns a child context carrying channel and chatID.
 func WithToolContext(ctx context.Context, channel, chatID string) context.Context {
+	return WithToolRoutingContext(ctx, channel, chatID, "")
+}
+
+// WithToolRoutingContext returns a child context carrying channel, chatID,
+// and an optional reply correlation token for request-bound outbound messages.
+func WithToolRoutingContext(ctx context.Context, channel, chatID, replyTo string) context.Context {
 	ctx = context.WithValue(ctx, ctxKeyChannel, channel)
 	ctx = context.WithValue(ctx, ctxKeyChatID, chatID)
+	ctx = context.WithValue(ctx, ctxKeyReplyTo, replyTo)
 	return ctx
 }
 
@@ -41,6 +49,12 @@ func ToolChannel(ctx context.Context) string {
 // ToolChatID extracts the chatID from ctx, or "" if unset.
 func ToolChatID(ctx context.Context) string {
 	v, _ := ctx.Value(ctxKeyChatID).(string)
+	return v
+}
+
+// ToolReplyTo extracts the reply correlation token from ctx, or "" if unset.
+func ToolReplyTo(ctx context.Context) string {
+	v, _ := ctx.Value(ctxKeyReplyTo).(string)
 	return v
 }
 

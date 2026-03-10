@@ -91,6 +91,12 @@ func (s *appState) buildChannelMenuItems() []MenuItem {
 			s.config.Channels.WeComApp.Enabled,
 			func() { s.push("channel-wecomapp", s.wecomAppForm()) },
 		),
+		channelItem(
+			"WeCom Official",
+			"WeCom official websocket settings",
+			s.config.Channels.WeComOfficial.Enabled,
+			func() { s.push("channel-wecomofficial", s.wecomOfficialForm()) },
+		),
 	}
 }
 
@@ -348,6 +354,25 @@ func (s *appState) wecomAppForm() tview.Primitive {
 		cfg.ReplyTimeout,
 		func(value int) { cfg.ReplyTimeout = value },
 	)
+	return wrapWithBack(form, s)
+}
+
+func (s *appState) wecomOfficialForm() tview.Primitive {
+	cfg := &s.config.Channels.WeComOfficial
+	form := baseChannelForm("WeCom Official", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
+	form.AddInputField("Bot ID", cfg.BotID, 128, nil, func(text string) {
+		cfg.BotID = strings.TrimSpace(text)
+	})
+	form.AddInputField("Secret", cfg.Secret, 128, nil, func(text string) {
+		cfg.Secret = strings.TrimSpace(text)
+	})
+	form.AddInputField("WebSocket URL", cfg.WebSocketURL, 128, nil, func(text string) {
+		cfg.WebSocketURL = strings.TrimSpace(text)
+	})
+	form.AddInputField("Welcome Message", cfg.WelcomeMessage, 256, nil, func(text string) {
+		cfg.WelcomeMessage = text
+	})
+	addAllowFromField(form, &cfg.AllowFrom)
 	return wrapWithBack(form, s)
 }
 

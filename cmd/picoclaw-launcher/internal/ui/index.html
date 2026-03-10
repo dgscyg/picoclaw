@@ -541,6 +541,7 @@
                         <div class="sidebar-item" data-panel="panelCh_matrix">Matrix</div>
                         <div class="sidebar-item" data-panel="panelCh_wecom">WeCom</div>
                         <div class="sidebar-item" data-panel="panelCh_wecom_app">WeCom App</div>
+                        <div class="sidebar-item" data-panel="panelCh_wecom_official">WeCom Official</div>
                         <div class="sidebar-item" data-panel="panelCh_dingtalk">DingTalk</div>
                         <div class="sidebar-item" data-panel="panelCh_feishu" data-i18n="sidebar.feishu">Feishu</div>
                         <div class="sidebar-item" data-panel="panelCh_line">LINE</div>
@@ -610,6 +611,7 @@
                 <div class="content-panel" id="panelCh_matrix"></div>
                 <div class="content-panel" id="panelCh_wecom"></div>
                 <div class="content-panel" id="panelCh_wecom_app"></div>
+                <div class="content-panel" id="panelCh_wecom_official"></div>
                 <div class="content-panel" id="panelCh_dingtalk"></div>
                 <div class="content-panel" id="panelCh_feishu"></div>
                 <div class="content-panel" id="panelCh_line"></div>
@@ -1047,6 +1049,15 @@ const channelSchemas = {
             { key: 'webhook_port', label: 'Webhook Port', type: 'number', placeholder: '18792' },
             { key: 'webhook_path', label: 'Webhook Path', type: 'text', placeholder: '/webhook/wecom-app' },
             { key: 'reply_timeout', label: 'Reply Timeout (s)', type: 'number', placeholder: '5' },
+        ]
+    },
+    wecom_official: {
+        title: 'WeCom Official', configKey: 'wecom_official', docSlug: 'wecom-official',
+        fields: [
+            { key: 'bot_id', label: 'Bot ID', type: 'text', placeholder: 'Official WeCom bot ID' },
+            { key: 'secret', label: 'Secret', type: 'password', placeholder: 'Official WeCom bot secret' },
+            { key: 'websocket_url', label: 'WebSocket URL', type: 'text', placeholder: 'wss://openws.work.weixin.qq.com' },
+            { key: 'welcome_message', label: 'Welcome Message', type: 'text', placeholder: 'Optional welcome text' },
         ]
     },
     dingtalk: {

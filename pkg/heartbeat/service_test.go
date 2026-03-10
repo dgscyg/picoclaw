@@ -38,6 +38,9 @@ func TestExecuteHeartbeat_Async(t *testing.T) {
 
 	// Create HEARTBEAT.md
 	os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Test task"), 0o644)
+	if err := hs.state.SetLastChannel("telegram:123"); err != nil {
+		t.Fatalf("SetLastChannel() error = %v", err)
+	}
 
 	// Execute heartbeat directly (internal method for testing)
 	hs.executeHeartbeat()
@@ -93,6 +96,9 @@ func TestExecuteHeartbeat_ResultLogging(t *testing.T) {
 			})
 
 			os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Test task"), 0o644)
+			if err := hs.state.SetLastChannel("telegram:123"); err != nil {
+				t.Fatalf("SetLastChannel() error = %v", err)
+			}
 			hs.executeHeartbeat()
 
 			logFile := filepath.Join(tmpDir, "heartbeat.log")
@@ -159,9 +165,107 @@ func TestExecuteHeartbeat_NilResult(t *testing.T) {
 
 	// Create HEARTBEAT.md
 	os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Test task"), 0o644)
+	if err := hs.state.SetLastChannel("telegram:123"); err != nil {
+		t.Fatalf("SetLastChannel() error = %v", err)
+	}
 
 	// Should not panic with nil result
 	hs.executeHeartbeat()
+}
+
+func TestExecuteHeartbeat_SkipsWithoutLastChannel(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "heartbeat-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	hs := NewHeartbeatService(tmpDir, 30, true)
+	hs.stopChan = make(chan struct{})
+
+	called := false
+	hs.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
+		called = true
+		return tools.SilentResult("unexpected")
+	})
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Test task"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	hs.executeHeartbeat()
+
+	if called {
+		t.Fatal("expected heartbeat handler to be skipped without last channel")
+	}
+}
+
+func TestExecuteHeartbeat_SkipsRecentActivityAfterStart(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "heartbeat-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	hs := NewHeartbeatService(tmpDir, 30, true)
+	hs.stopChan = make(chan struct{})
+	hs.startedAt = time.Now().Add(-time.Second)
+
+	called := false
+	hs.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
+		called = true
+		return tools.SilentResult("unexpected")
+	})
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Test task"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := hs.state.SetLastChannel("telegram:123"); err != nil {
+		t.Fatalf("SetLastChannel() error = %v", err)
+	}
+
+	hs.executeHeartbeat()
+
+	if called {
+		t.Fatal("expected heartbeat handler to be skipped for recent activity")
+	}
+}
+
+func TestHeartbeatRunLoop_DelaysFirstExecutionByIntervalCap(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "heartbeat-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	hs := NewHeartbeatService(tmpDir, 30, true)
+	hs.interval = 100 * time.Millisecond
+	if err := hs.state.SetLastChannel("telegram:123"); err != nil {
+		t.Fatalf("SetLastChannel() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Test task"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	called := make(chan struct{}, 1)
+	hs.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
+		select {
+		case called <- struct{}{}:
+		default:
+		}
+		return tools.SilentResult("ok")
+	})
+
+	if err := hs.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer hs.Stop()
+
+	select {
+	case <-called:
+	case <-time.After(600 * time.Millisecond):
+		t.Fatal("expected heartbeat to execute after startup delay")
+	}
 }
 
 // TestLogPath verifies heartbeat log is written to workspace directory

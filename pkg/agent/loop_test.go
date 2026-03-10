@@ -175,10 +175,62 @@ func TestToolContext_Updates(t *testing.T) {
 	if got := tools.ToolChatID(ctx); got != "chat-42" {
 		t.Errorf("expected chatID 'chat-42', got %q", got)
 	}
+	if got := tools.ToolReplyTo(ctx); got != "" {
+		t.Errorf("expected empty replyTo, got %q", got)
+	}
 
 	// Empty context returns empty strings
 	if got := tools.ToolChannel(context.Background()); got != "" {
 		t.Errorf("expected empty channel from bare context, got %q", got)
+	}
+}
+
+func TestAgentLoopRun_PropagatesReplyToToOutbound(t *testing.T) {
+	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- al.Run(runCtx)
+	}()
+	defer func() {
+		runCancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for agent loop to stop")
+		}
+	}()
+
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pubCancel()
+
+	err := msgBus.PublishInbound(pubCtx, bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:user-9",
+		ChatID:   "user-9",
+		Content:  "hello",
+		Metadata: map[string]string{
+			"reply_to": "callback-req-9",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	outCtx, outCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer outCancel()
+
+	msg, ok := msgBus.SubscribeOutbound(outCtx)
+	if !ok {
+		t.Fatal("expected outbound message")
+	}
+	if got, want := msg.Content, "Mock response"; got != want {
+		t.Fatalf("Content = %q, want %q", got, want)
+	}
+	if got, want := msg.ReplyTo, "callback-req-9"; got != want {
+		t.Fatalf("ReplyTo = %q, want %q", got, want)
 	}
 }
 

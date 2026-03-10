@@ -55,6 +55,7 @@ type processOptions struct {
 	SessionKey      string   // Session identifier for history/context
 	Channel         string   // Target channel for tool execution
 	ChatID          string   // Target chat ID for tool execution
+	ReplyTo         string   // Optional channel-specific reply correlation token
 	UserMessage     string   // User message content (may include prefix)
 	Media           []string // media:// refs from inbound message
 	DefaultResponse string   // Response when LLM returns empty
@@ -171,13 +172,14 @@ func registerSharedTools(
 		// Message tool
 		if cfg.Tools.IsToolEnabled("message") {
 			messageTool := tools.NewMessageTool()
-			messageTool.SetSendCallback(func(channel, chatID, content string) error {
+			messageTool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
 				pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer pubCancel()
 				return msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
 					Channel: channel,
 					ChatID:  chatID,
 					Content: content,
+					ReplyTo: tools.ToolReplyTo(ctx),
 				})
 			})
 			agent.Tools.Register(messageTool)
@@ -354,6 +356,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 							Channel: msg.Channel,
 							ChatID:  msg.ChatID,
 							Content: response,
+							ReplyTo: inboundMetadata(msg, "reply_to"),
 						})
 						logger.InfoCF("agent", "Published outbound response",
 							map[string]any{
@@ -546,6 +549,7 @@ func (al *AgentLoop) ProcessHeartbeat(
 		SessionKey:      "heartbeat",
 		Channel:         channel,
 		ChatID:          chatID,
+		ReplyTo:         "",
 		UserMessage:     content,
 		DefaultResponse: defaultResponse,
 		EnableSummary:   false,
@@ -619,6 +623,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		SessionKey:      sessionKey,
 		Channel:         msg.Channel,
 		ChatID:          msg.ChatID,
+		ReplyTo:         inboundMetadata(msg, "reply_to"),
 		UserMessage:     msg.Content,
 		Media:           msg.Media,
 		DefaultResponse: defaultResponse,
@@ -713,6 +718,7 @@ func (al *AgentLoop) processSystemMessage(
 		SessionKey:      sessionKey,
 		Channel:         originChannel,
 		ChatID:          originChatID,
+		ReplyTo:         "",
 		UserMessage:     fmt.Sprintf("[System: %s] %s", msg.SenderID, msg.Content),
 		DefaultResponse: "Background task completed.",
 		EnableSummary:   false,
@@ -792,6 +798,7 @@ func (al *AgentLoop) runAgentLoop(
 			Channel: opts.Channel,
 			ChatID:  opts.ChatID,
 			Content: finalContent,
+			ReplyTo: opts.ReplyTo,
 		})
 	}
 
@@ -1013,6 +1020,7 @@ func (al *AgentLoop) runLLMIteration(
 						Channel: opts.Channel,
 						ChatID:  opts.ChatID,
 						Content: "Context window exceeded. Compressing history and retrying...",
+						ReplyTo: opts.ReplyTo,
 					})
 				}
 
@@ -1160,6 +1168,7 @@ func (al *AgentLoop) runLLMIteration(
 							Channel: opts.Channel,
 							ChatID:  opts.ChatID,
 							Content: result.ForUser,
+							ReplyTo: opts.ReplyTo,
 						})
 					}
 
@@ -1195,6 +1204,7 @@ func (al *AgentLoop) runLLMIteration(
 					tc.Arguments,
 					opts.Channel,
 					opts.ChatID,
+					opts.ReplyTo,
 					asyncCallback,
 				)
 				agentResults[idx].result = toolResult
@@ -1210,6 +1220,7 @@ func (al *AgentLoop) runLLMIteration(
 					Channel: opts.Channel,
 					ChatID:  opts.ChatID,
 					Content: r.result.ForUser,
+					ReplyTo: opts.ReplyTo,
 				})
 				logger.DebugCF("agent", "Sent tool result to user",
 					map[string]any{

@@ -183,6 +183,16 @@
       "welcome_message": "Hello! I'm your AI assistant. How can I help you today?",
       "reasoning_channel_id": ""
     },
+    "wecom_official": {
+      "_comment": "WeCom Official (Smart Bot WebSocket) - official long connection for inbound chats and proactive notifications.",
+      "enabled": false,
+      "bot_id": "YOUR_BOT_ID",
+      "secret": "YOUR_BOT_SECRET",
+      "websocket_url": "wss://openws.work.weixin.qq.com",
+      "allow_from": [],
+      "welcome_message": "",
+      "reasoning_channel_id": ""
+    },
     "irc": {
       "enabled": false,
       "server": "irc.libera.chat:6697",

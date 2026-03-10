@@ -9,15 +9,16 @@ import (
 func TestMessageTool_Execute_Success(t *testing.T) {
 	tool := NewMessageTool()
 
-	var sentChannel, sentChatID, sentContent string
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	var sentChannel, sentChatID, sentContent, sentReplyTo string
+	tool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
 		sentChannel = channel
 		sentChatID = chatID
 		sentContent = content
+		sentReplyTo = ToolReplyTo(ctx)
 		return nil
 	})
 
-	ctx := WithToolContext(context.Background(), "test-channel", "test-chat-id")
+	ctx := WithToolRoutingContext(context.Background(), "test-channel", "test-chat-id", "reply-1")
 	args := map[string]any{
 		"content": "Hello, world!",
 	}
@@ -33,6 +34,9 @@ func TestMessageTool_Execute_Success(t *testing.T) {
 	}
 	if sentContent != "Hello, world!" {
 		t.Errorf("Expected content 'Hello, world!', got '%s'", sentContent)
+	}
+	if sentReplyTo != "reply-1" {
+		t.Errorf("Expected replyTo 'reply-1', got '%s'", sentReplyTo)
 	}
 
 	// Verify ToolResult meets US-011 criteria:
@@ -61,7 +65,7 @@ func TestMessageTool_Execute_WithCustomChannel(t *testing.T) {
 	tool := NewMessageTool()
 
 	var sentChannel, sentChatID string
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(_ context.Context, channel, chatID, content string) error {
 		sentChannel = channel
 		sentChatID = chatID
 		return nil
@@ -96,7 +100,7 @@ func TestMessageTool_Execute_SendFailure(t *testing.T) {
 	tool := NewMessageTool()
 
 	sendErr := errors.New("network error")
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(_ context.Context, channel, chatID, content string) error {
 		return sendErr
 	})
 
@@ -149,7 +153,7 @@ func TestMessageTool_Execute_NoTargetChannel(t *testing.T) {
 	tool := NewMessageTool()
 	// No WithToolContext — channel/chatID are empty
 
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(_ context.Context, channel, chatID, content string) error {
 		return nil
 	})
 

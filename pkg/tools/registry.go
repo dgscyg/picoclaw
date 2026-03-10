@@ -41,7 +41,7 @@ func (r *ToolRegistry) Get(name string) (Tool, bool) {
 }
 
 func (r *ToolRegistry) Execute(ctx context.Context, name string, args map[string]any) *ToolResult {
-	return r.ExecuteWithContext(ctx, name, args, "", "", nil)
+	return r.ExecuteWithContext(ctx, name, args, "", "", "", nil)
 }
 
 // ExecuteWithContext executes a tool with channel/chatID context and optional async callback.
@@ -53,6 +53,7 @@ func (r *ToolRegistry) ExecuteWithContext(
 	name string,
 	args map[string]any,
 	channel, chatID string,
+	replyTo string,
 	asyncCallback AsyncCallback,
 ) *ToolResult {
 	logger.InfoCF("tool", "Tool execution started",
@@ -70,9 +71,10 @@ func (r *ToolRegistry) ExecuteWithContext(
 		return ErrorResult(fmt.Sprintf("tool %q not found", name)).WithError(fmt.Errorf("tool not found"))
 	}
 
-	// Inject channel/chatID into ctx so tools read them via ToolChannel(ctx)/ToolChatID(ctx).
+	// Inject routing context so tools can target the current conversation and,
+	// when supported by the channel, reply to the originating platform callback.
 	// Always inject — tools validate what they require.
-	ctx = WithToolContext(ctx, channel, chatID)
+	ctx = WithToolRoutingContext(ctx, channel, chatID, replyTo)
 
 	// If tool implements AsyncExecutor and callback is provided, use ExecuteAsync.
 	// The callback is a call parameter, not mutable state on the tool instance.
