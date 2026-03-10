@@ -96,6 +96,14 @@ func NewAgentInstance(
 		toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict, allowWritePaths))
 	}
 
+	// Register memory tools
+	if cfg.Tools.IsToolEnabled("memory_store") {
+		toolsRegistry.Register(tools.NewMemoryStoreTool(memoryProvider))
+	}
+	if cfg.Tools.IsToolEnabled("memory_recall") {
+		toolsRegistry.Register(tools.NewMemoryRecallTool(memoryProvider))
+	}
+
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
 
