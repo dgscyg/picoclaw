@@ -175,6 +175,10 @@ func DefaultConfig() *Config {
 					Enabled: true,
 					Text:    "Thinking... 💭",
 				},
+				Card: CardConfig{
+					Enabled: false,
+					Title:   "PicoClaw",
+				},
 				WelcomeMessage: "",
 			},
 			Pico: PicoConfig{

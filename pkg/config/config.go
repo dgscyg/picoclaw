@@ -253,6 +253,12 @@ type PlaceholderConfig struct {
 	Text    string `json:"text,omitempty"`
 }
 
+// CardConfig controls channel-local text-to-card rendering.
+type CardConfig struct {
+	Enabled bool   `json:"enabled,omitempty"`
+	Title   string `json:"title,omitempty"`
+}
+
 type WhatsAppConfig struct {
 	Enabled            bool                `json:"enabled"              env:"PICOCLAW_CHANNELS_WHATSAPP_ENABLED"`
 	BridgeURL          string              `json:"bridge_url"           env:"PICOCLAW_CHANNELS_WHATSAPP_BRIDGE_URL"`
@@ -427,6 +433,7 @@ type WeComOfficialConfig struct {
 	GroupTrigger        GroupTriggerConfig  `json:"group_trigger,omitempty"`
 	SendThinkingMessage *bool               `json:"sendThinkingMessage,omitempty"`
 	Placeholder         PlaceholderConfig   `json:"placeholder,omitempty"`
+	Card                CardConfig          `json:"card,omitempty"`
 	WelcomeMessage      string              `json:"welcome_message,omitempty" env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_WELCOME_MESSAGE"`
 	ReasoningChannelID  string              `json:"reasoning_channel_id" env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_REASONING_CHANNEL_ID"`
 }

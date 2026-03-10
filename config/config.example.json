@@ -194,6 +194,10 @@
         "enabled": true,
         "text": "Thinking... 💭"
       },
+      "card": {
+        "enabled": false,
+        "title": "PicoClaw"
+      },
       "welcome_message": "",
       "reasoning_channel_id": ""
     },

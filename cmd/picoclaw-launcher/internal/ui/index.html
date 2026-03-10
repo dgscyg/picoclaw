@@ -1059,6 +1059,8 @@ const channelSchemas = {
             { key: 'websocket_url', label: 'WebSocket URL', type: 'text', placeholder: 'wss://openws.work.weixin.qq.com' },
             { key: 'sendThinkingMessage', label: 'Send Thinking Message', type: 'toggle' },
             { key: 'placeholder_text', label: 'Placeholder Text', type: 'text', placeholder: 'Thinking... 💭' },
+            { key: 'card_enabled', label: 'Use Card', type: 'toggle' },
+            { key: 'card_title', label: 'Card Title', type: 'text', placeholder: 'PicoClaw' },
             { key: 'welcome_message', label: 'Welcome Message', type: 'text', placeholder: 'Optional welcome text' },
         ]
     },
@@ -1445,8 +1447,19 @@ function renderChannelForm(chKey) {
         const label = f.i18nLabel ? t(f.label) : f.label;
         if (f.type === 'toggle') {
             const hint = f.i18nLabel && f.hint ? t(f.hint) : (f.hint || '');
+            let toggleOn = !!chData[f.key];
+            if (chKey === 'wecom_official' && f.key === 'sendThinkingMessage') {
+                if (chData.sendThinkingMessage !== undefined && chData.sendThinkingMessage !== null) {
+                    toggleOn = !!chData.sendThinkingMessage;
+                } else {
+                    toggleOn = !!(chData.placeholder && chData.placeholder.enabled);
+                }
+            }
+            if (chKey === 'wecom_official' && f.key === 'card_enabled') {
+                toggleOn = !!(chData.card && chData.card.enabled);
+            }
             html += `<div class="toggle-row">`;
-            html += `<div class="toggle ${chData[f.key] ? 'on' : ''}" data-chfield="${f.key}" onclick="this.classList.toggle('on')"></div>`;
+            html += `<div class="toggle ${toggleOn ? 'on' : ''}" data-chfield="${f.key}" onclick="this.classList.toggle('on')"></div>`;
             html += `<span class="toggle-label">${label}</span>`;
             if (hint) html += `<span class="form-hint" style="margin-left:8px;">${hint}</span>`;
             html += `</div>`;
@@ -1474,6 +1487,9 @@ function renderChannelForm(chKey) {
             }
             if (chKey === 'wecom_official' && f.key === 'placeholder_text') {
                 val = (chData.placeholder && chData.placeholder.text) ? chData.placeholder.text : '';
+            }
+            if (chKey === 'wecom_official' && f.key === 'card_title') {
+                val = (chData.card && chData.card.title) ? chData.card.title : '';
             }
             html += `<div class="form-group">`;
             html += `<label class="form-label">${label}</label>`;
@@ -1541,6 +1557,9 @@ function saveChannelForm(chKey) {
                     chObj.sendThinkingMessage = checked;
                     chObj.placeholder = chObj.placeholder || {};
                     chObj.placeholder.enabled = checked;
+                } else if (chKey === 'wecom_official' && f.key === 'card_enabled') {
+                    chObj.card = chObj.card || {};
+                    chObj.card.enabled = checked;
                 } else {
                     chObj[f.key] = checked;
                 }
@@ -1566,6 +1585,9 @@ function saveChannelForm(chKey) {
                 if (chKey === 'wecom_official' && f.key === 'placeholder_text') {
                     chObj.placeholder = chObj.placeholder || {};
                     chObj.placeholder.text = val === '' ? 'Thinking... 💭' : val;
+                } else if (chKey === 'wecom_official' && f.key === 'card_title') {
+                    chObj.card = chObj.card || {};
+                    chObj.card.title = val === '' ? 'PicoClaw' : val;
                 } else {
                     chObj[f.key] = val === '' ? (f.type === 'number' ? 0 : '') : val;
                 }

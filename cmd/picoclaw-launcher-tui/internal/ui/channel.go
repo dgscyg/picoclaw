@@ -384,6 +384,16 @@ func (s *appState) wecomOfficialForm() tview.Primitive {
 	form.AddInputField("Placeholder Text", placeholderText, 128, nil, func(text string) {
 		cfg.Placeholder.Text = text
 	})
+	form.AddCheckbox("Use Card", cfg.Card.Enabled, func(checked bool) {
+		cfg.Card.Enabled = checked
+	})
+	cardTitle := cfg.Card.Title
+	if strings.TrimSpace(cardTitle) == "" {
+		cardTitle = "PicoClaw"
+	}
+	form.AddInputField("Card Title", cardTitle, 128, nil, func(text string) {
+		cfg.Card.Title = strings.TrimSpace(text)
+	})
 	form.AddInputField("Welcome Message", cfg.WelcomeMessage, 256, nil, func(text string) {
 		cfg.WelcomeMessage = text
 	})

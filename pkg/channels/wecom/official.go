@@ -44,6 +44,9 @@ const (
 	wecomOfficialMaxMessageLength    = 4000
 	wecomOfficialMaxReconnects       = 100
 	wecomOfficialMaxMissedHeartbeats = 2
+	wecomOfficialDefaultCardTitle    = "PicoClaw"
+	wecomOfficialCardSummaryLimit    = 112
+	wecomOfficialCardQuoteLimit      = 1024
 
 	wecomOfficialDialTimeout          = 15 * time.Second
 	wecomOfficialWriteTimeout         = 10 * time.Second
@@ -59,6 +62,17 @@ const (
 var (
 	errWeComOfficialAuthFailed = errors.New("wecom official authentication failed")
 	wecomOfficialAtPattern     = regexp.MustCompile(`@\S+`)
+	wecomOfficialCardHeadingRE = regexp.MustCompile(`(?m)^\s{0,3}#{1,6}\s*`)
+	wecomOfficialCardQuoteRE   = regexp.MustCompile(`(?m)^\s*>\s?`)
+	wecomOfficialCardBlankRE   = regexp.MustCompile(`\n{3,}`)
+	wecomOfficialCardReplacer  = strings.NewReplacer(
+		"\r\n", "\n",
+		"```", "",
+		"**", "",
+		"__", "",
+		"~~", "",
+		"`", "",
+	)
 )
 
 type wecomOfficialHeaders struct {
@@ -158,6 +172,7 @@ type wecomOfficialReplyTask struct {
 	CreatedAt time.Time
 
 	accumulated string
+	cardSent    bool
 	mu          sync.Mutex
 	timer       *time.Timer
 	sequence    uint64
@@ -177,6 +192,18 @@ func (c *WeComOfficialChannel) placeholderText() string {
 		return "Thinking... 💭"
 	}
 	return text
+}
+
+func (c *WeComOfficialChannel) cardEnabled() bool {
+	return c.config.Card.Enabled
+}
+
+func (c *WeComOfficialChannel) cardTitle() string {
+	title := strings.TrimSpace(c.config.Card.Title)
+	if title == "" {
+		return wecomOfficialDefaultCardTitle
+	}
+	return title
 }
 
 // WeComOfficialChannel implements the official WeCom Smart Bot websocket channel.
@@ -275,6 +302,10 @@ func (c *WeComOfficialChannel) Send(ctx context.Context, msg bus.OutboundMessage
 			return err
 		}
 		return nil
+	}
+
+	if c.cardEnabled() {
+		return c.sendTemplateCardMessage(ctx, msg.ChatID, msg.Content)
 	}
 
 	return c.sendMarkdownMessage(ctx, msg.ChatID, msg.Content)
@@ -584,7 +615,12 @@ func (c *WeComOfficialChannel) handleEventMessage(frame wecomOfficialFrame, chat
 	ctx, cancel := context.WithTimeout(c.ctx, wecomOfficialSendTimeout)
 	defer cancel()
 
-	if err := c.sendWelcomeText(ctx, frame.Headers.ReqID, welcome); err != nil {
+	sendWelcome := c.sendWelcomeText
+	if c.cardEnabled() {
+		sendWelcome = c.sendWelcomeTemplateCard
+	}
+
+	if err := sendWelcome(ctx, frame.Headers.ReqID, welcome); err != nil {
 		logger.ErrorCF("wecom_official", "Failed to send welcome message", map[string]any{
 			"chat_id": chatID,
 			"error":   err.Error(),
@@ -793,14 +829,34 @@ func (c *WeComOfficialChannel) downloadMediaSource(
 }
 
 func decryptWeComOfficialMedia(data []byte, aesKey string) ([]byte, error) {
-	key, err := base64.StdEncoding.DecodeString(aesKey)
+	key, err := decodeWeComOfficialMediaAESKey(aesKey)
 	if err != nil {
 		return nil, fmt.Errorf("decode media aes key: %w", err)
+	}
+	return decryptAESCBC(key, data)
+}
+
+func decodeWeComOfficialMediaAESKey(aesKey string) ([]byte, error) {
+	aesKey = strings.TrimSpace(aesKey)
+	if aesKey == "" {
+		return nil, fmt.Errorf("empty aes key")
+	}
+
+	if mod := len(aesKey) % 4; mod != 0 {
+		aesKey += strings.Repeat("=", 4-mod)
+	}
+
+	key, err := base64.StdEncoding.DecodeString(aesKey)
+	if err != nil {
+		key, err = base64.URLEncoding.DecodeString(aesKey)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(key) != 32 {
 		return nil, fmt.Errorf("invalid media aes key length: %d", len(key))
 	}
-	return decryptAESCBC(key, data)
+	return key, nil
 }
 
 func deriveWeComOfficialFilename(
@@ -885,6 +941,63 @@ func mediaTagForWeComOfficialSource(kind string) string {
 	}
 }
 
+func normalizeWeComOfficialCardText(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+
+	content = wecomOfficialCardReplacer.Replace(content)
+	content = wecomOfficialCardHeadingRE.ReplaceAllString(content, "")
+	content = wecomOfficialCardQuoteRE.ReplaceAllString(content, "")
+	content = wecomOfficialCardBlankRE.ReplaceAllString(content, "\n\n")
+
+	lines := strings.Split(content, "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		cleaned = append(cleaned, strings.TrimRight(line, " \t"))
+	}
+
+	return strings.TrimSpace(strings.Join(cleaned, "\n"))
+}
+
+func truncateWeComOfficialCardText(text string, limit int) string {
+	if limit <= 0 {
+		return text
+	}
+
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
+}
+
+func buildWeComOfficialTemplateCard(title, content string) map[string]any {
+	plain := normalizeWeComOfficialCardText(content)
+	card := map[string]any{
+		"card_type": "text_notice",
+		"main_title": map[string]string{
+			"title": strings.TrimSpace(title),
+		},
+	}
+	if plain == "" {
+		return card
+	}
+
+	card["sub_title_text"] = truncateWeComOfficialCardText(plain, wecomOfficialCardSummaryLimit)
+	if strings.Contains(plain, "\n") || len([]rune(plain)) > wecomOfficialCardSummaryLimit {
+		card["quote_area"] = map[string]string{
+			"title":      "Reply",
+			"quote_text": truncateWeComOfficialCardText(plain, wecomOfficialCardQuoteLimit),
+		}
+	}
+	return card
+}
+
 func (c *WeComOfficialChannel) sendMarkdownMessage(
 	ctx context.Context,
 	chatID, content string,
@@ -900,6 +1013,23 @@ func (c *WeComOfficialChannel) sendMarkdownMessage(
 		"markdown": map[string]string{
 			"content": content,
 		},
+	}, wecomOfficialSendTimeout)
+	return err
+}
+
+func (c *WeComOfficialChannel) sendTemplateCardMessage(
+	ctx context.Context,
+	chatID, content string,
+) error {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+
+	_, err := c.sendCommandAndWait(ctx, wecomOfficialCmdSendMessage, map[string]any{
+		"chatid":        chatID,
+		"msgtype":       "template_card",
+		"template_card": buildWeComOfficialTemplateCard(c.cardTitle(), content),
 	}, wecomOfficialSendTimeout)
 	return err
 }
@@ -927,8 +1057,16 @@ func (c *WeComOfficialChannel) sendReplyChunk(
 	task.sequence++
 	seq := task.sequence
 	accumulated := task.accumulated
-
-	err := c.sendReplyStream(ctx, task.ReqID, task.StreamID, accumulated, false)
+	sendWithCard := c.cardEnabled() && !task.cardSent
+	var err error
+	if sendWithCard {
+		err = c.sendReplyStreamWithCard(ctx, task.ReqID, task.StreamID, accumulated, false, true)
+		if err == nil {
+			task.cardSent = true
+		}
+	} else {
+		err = c.sendReplyStream(ctx, task.ReqID, task.StreamID, accumulated, false)
+	}
 	if err != nil {
 		task.mu.Unlock()
 		return err
@@ -980,6 +1118,28 @@ func (c *WeComOfficialChannel) sendReplyStream(
 	return err
 }
 
+func (c *WeComOfficialChannel) sendReplyStreamWithCard(
+	ctx context.Context,
+	reqID, streamID, content string,
+	finish bool,
+	includeCard bool,
+) error {
+	body := map[string]any{
+		"msgtype": "stream_with_template_card",
+		"stream": map[string]any{
+			"id":      streamID,
+			"finish":  finish,
+			"content": content,
+		},
+	}
+	if includeCard {
+		body["template_card"] = buildWeComOfficialTemplateCard(c.cardTitle(), content)
+	}
+
+	_, err := c.sendCommandWithReqIDAndWait(ctx, reqID, wecomOfficialCmdRespondMessage, body, wecomOfficialSendTimeout)
+	return err
+}
+
 func (c *WeComOfficialChannel) sendWelcomeText(ctx context.Context, reqID, content string) error {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -991,6 +1151,19 @@ func (c *WeComOfficialChannel) sendWelcomeText(ctx context.Context, reqID, conte
 		"text": map[string]string{
 			"content": content,
 		},
+	}, wecomOfficialSendTimeout)
+	return err
+}
+
+func (c *WeComOfficialChannel) sendWelcomeTemplateCard(ctx context.Context, reqID, content string) error {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+
+	_, err := c.sendCommandWithReqIDAndWait(ctx, reqID, wecomOfficialCmdRespondWelcome, map[string]any{
+		"msgtype":       "template_card",
+		"template_card": buildWeComOfficialTemplateCard(c.cardTitle(), content),
 	}, wecomOfficialSendTimeout)
 	return err
 }
@@ -1162,7 +1335,10 @@ func (c *WeComOfficialChannel) finishReplyTask(task *wecomOfficialReplyTask, seq
 	accumulated := task.accumulated
 
 	ctx, cancel := context.WithTimeout(context.Background(), wecomOfficialSendTimeout)
-	err := c.sendReplyStream(ctx, task.ReqID, task.StreamID, accumulated, true)
+	sendFinal := func() error {
+		return c.sendReplyStream(ctx, task.ReqID, task.StreamID, accumulated, true)
+	}
+	err := sendFinal()
 	cancel()
 	if err != nil {
 		logger.WarnCF("wecom_official", "Failed to finish reply stream", map[string]any{

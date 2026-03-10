@@ -2,6 +2,7 @@ package wecom
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -169,6 +170,47 @@ func TestNewWeComOfficialChannel(t *testing.T) {
 	})
 }
 
+func TestBuildWeComOfficialTemplateCardNormalizesMarkdown(t *testing.T) {
+	card := buildWeComOfficialTemplateCard("Ops Bot", "# Heading\n\n**bold**\n> quoted")
+
+	raw, err := json.Marshal(card)
+	if err != nil {
+		t.Fatalf("marshal card: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal card: %v", err)
+	}
+
+	if got, want := payload["card_type"], "text_notice"; got != want {
+		t.Fatalf("card_type = %v, want %v", got, want)
+	}
+	if got, want := payload["sub_title_text"], "Heading\n\nbold\nquoted"; got != want {
+		t.Fatalf("sub_title_text = %v, want %v", got, want)
+	}
+	quoteArea, ok := payload["quote_area"].(map[string]any)
+	if !ok {
+		t.Fatalf("quote_area missing or wrong type: %#v", payload["quote_area"])
+	}
+	if got, want := quoteArea["quote_text"], "Heading\n\nbold\nquoted"; got != want {
+		t.Fatalf("quote_area.quote_text = %v, want %v", got, want)
+	}
+}
+
+func TestDecodeWeComOfficialMediaAESKeyAcceptsUnpaddedBase64(t *testing.T) {
+	rawKey := []byte("0123456789abcdef0123456789abcdef")
+	encoded := strings.TrimRight(base64.StdEncoding.EncodeToString(rawKey), "=")
+
+	decoded, err := decodeWeComOfficialMediaAESKey(encoded)
+	if err != nil {
+		t.Fatalf("decodeWeComOfficialMediaAESKey() error = %v", err)
+	}
+	if string(decoded) != string(rawKey) {
+		t.Fatalf("decoded key mismatch: got %x want %x", decoded, rawKey)
+	}
+}
+
 func TestWeComOfficialSend(t *testing.T) {
 	server := newWeComOfficialTestServer(t, nil)
 	defer server.close()
@@ -217,6 +259,68 @@ func TestWeComOfficialSend(t *testing.T) {
 	}
 	if got, want := markdown["content"], "hello from picoclaw"; got != want {
 		t.Fatalf("markdown.content = %v, want %v", got, want)
+	}
+}
+
+func TestWeComOfficialSendUsesTemplateCardWhenEnabled(t *testing.T) {
+	server := newWeComOfficialTestServer(t, nil)
+	defer server.close()
+
+	msgBus := bus.NewMessageBus()
+	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
+		Enabled:             true,
+		BotID:               "bot-id",
+		Secret:              "bot-secret",
+		WebSocketURL:        server.wsURL,
+		SendThinkingMessage: boolPtr(false),
+		Card: config.CardConfig{
+			Enabled: true,
+			Title:   "Ops Bot",
+		},
+	}, msgBus)
+	if err != nil {
+		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := ch.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = ch.Stop(context.Background()) }()
+
+	server.waitAuth(t)
+
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel: "wecom_official",
+		ChatID:  "chat-card-1",
+		Content: "hello from card mode",
+	}); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	payload := server.waitSend(t)
+	if got, want := payload["msgtype"], "template_card"; got != want {
+		t.Fatalf("msgtype = %v, want %v", got, want)
+	}
+
+	card, ok := payload["template_card"].(map[string]any)
+	if !ok {
+		t.Fatalf("template_card missing or wrong type: %#v", payload["template_card"])
+	}
+	if got, want := card["card_type"], "text_notice"; got != want {
+		t.Fatalf("card_type = %v, want %v", got, want)
+	}
+	mainTitle, ok := card["main_title"].(map[string]any)
+	if !ok {
+		t.Fatalf("main_title missing or wrong type: %#v", card["main_title"])
+	}
+	if got, want := mainTitle["title"], "Ops Bot"; got != want {
+		t.Fatalf("main_title.title = %v, want %v", got, want)
+	}
+	if got, want := card["sub_title_text"], "hello from card mode"; got != want {
+		t.Fatalf("sub_title_text = %v, want %v", got, want)
 	}
 }
 
@@ -604,6 +708,125 @@ func TestWeComOfficialReplyAccumulatesStreamContent(t *testing.T) {
 	}
 }
 
+func TestWeComOfficialReplyFinishUsesStreamWithTemplateCardWhenEnabled(t *testing.T) {
+	server := newWeComOfficialTestServer(t, func(conn *websocket.Conn) {
+		body, err := json.Marshal(map[string]any{
+			"msgid":    "msg-card-1",
+			"aibotid":  "bot-id",
+			"chattype": "single",
+			"from": map[string]any{
+				"userid": "user-card-1",
+			},
+			"msgtype": "text",
+			"text": map[string]any{
+				"content": "render a card",
+			},
+		})
+		if err != nil {
+			t.Errorf("marshal callback body: %v", err)
+			return
+		}
+		if err := conn.WriteJSON(wecomOfficialFrame{
+			Cmd:     wecomOfficialCmdMessageCallback,
+			Headers: wecomOfficialHeaders{ReqID: "callback-card-1"},
+			Body:    body,
+		}); err != nil {
+			t.Errorf("write callback: %v", err)
+		}
+	})
+	defer server.close()
+
+	msgBus := bus.NewMessageBus()
+	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
+		Enabled:             true,
+		BotID:               "bot-id",
+		Secret:              "bot-secret",
+		WebSocketURL:        server.wsURL,
+		SendThinkingMessage: boolPtr(false),
+		Card: config.CardConfig{
+			Enabled: true,
+			Title:   "Ops Bot",
+		},
+	}, msgBus)
+	if err != nil {
+		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := ch.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = ch.Stop(context.Background()) }()
+
+	server.waitAuth(t)
+
+	consumeCtx, consumeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer consumeCancel()
+	inbound, ok := msgBus.ConsumeInbound(consumeCtx)
+	if !ok {
+		t.Fatal("expected inbound message from callback")
+	}
+
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel: "wecom_official",
+		ChatID:  "user-card-1",
+		Content: "final card reply",
+		ReplyTo: inbound.Metadata["reply_to"],
+	}); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	first := server.waitReply(t)
+	var firstBody map[string]any
+	if err := json.Unmarshal(first.Body, &firstBody); err != nil {
+		t.Fatalf("unmarshal first reply body: %v", err)
+	}
+	if got, want := firstBody["msgtype"], "stream_with_template_card"; got != want {
+		t.Fatalf("first msgtype = %v, want %v", got, want)
+	}
+	firstStream, ok := firstBody["stream"].(map[string]any)
+	if !ok {
+		t.Fatalf("first stream missing or wrong type: %#v", firstBody["stream"])
+	}
+	if got, want := firstStream["content"], "final card reply"; got != want {
+		t.Fatalf("first stream.content = %v, want %v", got, want)
+	}
+	if got, want := firstStream["finish"], false; got != want {
+		t.Fatalf("first stream.finish = %v, want %v", got, want)
+	}
+	firstCard, ok := firstBody["template_card"].(map[string]any)
+	if !ok {
+		t.Fatalf("first template_card missing or wrong type: %#v", firstBody["template_card"])
+	}
+	if got, want := firstCard["sub_title_text"], "final card reply"; got != want {
+		t.Fatalf("first sub_title_text = %v, want %v", got, want)
+	}
+
+	final := server.waitReply(t)
+	var finalBody map[string]any
+	if err := json.Unmarshal(final.Body, &finalBody); err != nil {
+		t.Fatalf("unmarshal final reply body: %v", err)
+	}
+	if got, want := finalBody["msgtype"], "stream"; got != want {
+		t.Fatalf("final msgtype = %v, want %v", got, want)
+	}
+	stream, ok := finalBody["stream"].(map[string]any)
+	if !ok {
+		t.Fatalf("stream missing or wrong type: %#v", finalBody["stream"])
+	}
+	if got, want := stream["content"], "final card reply"; got != want {
+		t.Fatalf("stream.content = %v, want %v", got, want)
+	}
+	if got, want := stream["finish"], true; got != want {
+		t.Fatalf("stream.finish = %v, want %v", got, want)
+	}
+	if _, ok := finalBody["template_card"]; ok {
+		t.Fatalf("final frame should not include template_card: %#v", finalBody["template_card"])
+	}
+}
+
 func TestWeComOfficialThinkingPlaceholderUsesConfiguredText(t *testing.T) {
 	server := newWeComOfficialTestServer(t, func(conn *websocket.Conn) {
 		body, err := json.Marshal(map[string]any{
@@ -749,5 +972,84 @@ func TestWeComOfficialWelcomeUsesWelcomeReplyCommand(t *testing.T) {
 	}
 	if got, want := text["content"], "welcome aboard"; got != want {
 		t.Fatalf("welcome text = %v, want %v", got, want)
+	}
+}
+
+func TestWeComOfficialWelcomeUsesTemplateCardWhenCardEnabled(t *testing.T) {
+	server := newWeComOfficialTestServer(t, func(conn *websocket.Conn) {
+		body, err := json.Marshal(map[string]any{
+			"msgid":   "event-card-1",
+			"aibotid": "bot-id",
+			"from": map[string]any{
+				"userid": "user-welcome-card",
+			},
+			"msgtype": "event",
+			"event": map[string]any{
+				"eventtype": "enter_chat",
+			},
+		})
+		if err != nil {
+			t.Errorf("marshal event body: %v", err)
+			return
+		}
+		if err := conn.WriteJSON(wecomOfficialFrame{
+			Cmd:     wecomOfficialCmdEventCallback,
+			Headers: wecomOfficialHeaders{ReqID: "event-card-req-1"},
+			Body:    body,
+		}); err != nil {
+			t.Errorf("write event callback: %v", err)
+		}
+	})
+	defer server.close()
+
+	msgBus := bus.NewMessageBus()
+	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
+		Enabled:             true,
+		BotID:               "bot-id",
+		Secret:              "bot-secret",
+		WebSocketURL:        server.wsURL,
+		SendThinkingMessage: boolPtr(false),
+		WelcomeMessage:      "welcome aboard",
+		Card: config.CardConfig{
+			Enabled: true,
+			Title:   "Ops Bot",
+		},
+	}, msgBus)
+	if err != nil {
+		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := ch.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = ch.Stop(context.Background()) }()
+
+	server.waitAuth(t)
+
+	reply := server.waitReply(t)
+	if got, want := reply.Cmd, wecomOfficialCmdRespondWelcome; got != want {
+		t.Fatalf("welcome reply cmd = %q, want %q", got, want)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(reply.Body, &body); err != nil {
+		t.Fatalf("unmarshal welcome body: %v", err)
+	}
+	if got, want := body["msgtype"], "template_card"; got != want {
+		t.Fatalf("welcome msgtype = %v, want %v", got, want)
+	}
+	card, ok := body["template_card"].(map[string]any)
+	if !ok {
+		t.Fatalf("template_card missing or wrong type: %#v", body["template_card"])
+	}
+	mainTitle, ok := card["main_title"].(map[string]any)
+	if !ok {
+		t.Fatalf("main_title missing or wrong type: %#v", card["main_title"])
+	}
+	if got, want := mainTitle["title"], "Ops Bot"; got != want {
+		t.Fatalf("main_title.title = %v, want %v", got, want)
 	}
 }
