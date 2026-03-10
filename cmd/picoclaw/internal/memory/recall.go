@@ -65,17 +65,13 @@ func recallMemories(ctx context.Context, cfg *config.Config, query string, limit
 		if err != nil {
 			return nil, err
 		}
-		resp, err := client.Activate(ctx, muninndb.ActivateRequest{
-			Query: strings.TrimSpace(query),
-			Limit: limit,
-			Mode:  "semantic",
-		})
+		resp, err := client.Activate(ctx, strings.TrimSpace(query), limit)
 		if err != nil {
 			return nil, fmt.Errorf("muninndb recall: %w", err)
 		}
-		entries := make([]string, 0, len(resp.Engrams))
-		for _, engram := range resp.Engrams {
-			content := formatEngram(engram)
+		entries := make([]string, 0, len(resp.Activations))
+		for _, item := range resp.Activations {
+			content := formatActivation(item)
 			if content == "" {
 				continue
 			}
@@ -89,24 +85,18 @@ func recallMemories(ctx context.Context, cfg *config.Config, query string, limit
 	}
 }
 
-func formatEngram(engram muninndb.Engram) string {
-	content := strings.TrimSpace(engram.Content)
-	if content == "" {
-		content = strings.TrimSpace(engram.Summary)
-	}
+func formatActivation(item muninndb.ActivationItem) string {
+	content := strings.TrimSpace(item.Content)
 	if content == "" {
 		return ""
 	}
 
 	parts := []string{content}
-	if len(engram.Tags) > 0 {
-		parts = append(parts, "Tags: "+strings.Join(engram.Tags, ", "))
+	if item.Concept != "" {
+		parts = append(parts, "Concept: "+item.Concept)
 	}
-	if engram.Concept != "" {
-		parts = append(parts, "Concept: "+engram.Concept)
-	}
-	if len(engram.KeyPoints) > 0 {
-		parts = append(parts, "Key Points: "+strings.Join(engram.KeyPoints, "; "))
+	if item.Score > 0 {
+		parts = append(parts, fmt.Sprintf("Relevance: %.2f", item.Score))
 	}
 	return strings.Join(parts, "\n")
 }

@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	internalcmd "github.com/sipeed/picoclaw/cmd/picoclaw/internal"
@@ -65,21 +63,17 @@ func storeMemory(ctx context.Context, cfg *config.Config, content, tags string, 
 		return err
 	}
 
-	id, err := uuid.NewRandom()
-	if err != nil {
-		return fmt.Errorf("generate engram id: %w", err)
+	concept := "Daily Note"
+	if longTerm {
+		concept = "Long-term Memory"
 	}
-	var engramID [16]byte
-	copy(engramID[:], id[:])
 
-	engram := muninndb.Engram{
-		ID:        engramID,
-		Content:   strings.TrimSpace(content),
-		Tags:      buildTags(tags, longTerm),
-		CreatedAt: time.Now().UTC(),
-	}
-	if err := client.WriteEngram(ctx, engram); err != nil {
+	resp, err := client.WriteEngram(ctx, strings.TrimSpace(content), buildTags(tags, longTerm), concept)
+	if err != nil {
 		return fmt.Errorf("muninndb store: %w", err)
+	}
+	if resp != nil {
+		fmt.Printf("Memory stored with ID: %s\n", resp.ID)
 	}
 	return nil
 }
