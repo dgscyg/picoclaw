@@ -40,7 +40,7 @@ Add to your `config.json`:
 }
 ```
 
-### 4. Start Gateway
+### 4. Start PicoClaw
 
 ```bash
 picoclaw gateway

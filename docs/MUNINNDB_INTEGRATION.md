@@ -20,7 +20,7 @@
 | `pkg/config/memory.go` | 记忆配置结构 |
 | `pkg/tools/memory_recall.go` | memory_recall 工具 |
 | `pkg/tools/memory_store.go` | memory_store 工具 |
-| `pkg/tools/memory_search.go` | memory_search 工具 |
+| `pkg/tools/memory_search.go` | memory_search 工具（预留/扩展） |
 | `cmd/picoclaw/internal/memory/command.go` | memory CLI 命令入口 |
 | `cmd/picoclaw/internal/memory/recall.go` | recall 子命令 |
 | `cmd/picoclaw/internal/memory/store.go` | store 子命令 |

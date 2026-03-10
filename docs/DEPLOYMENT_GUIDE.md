@@ -191,7 +191,7 @@ $env:MUNINNDB_TIMEOUT = "30s"
 ### 检查 MuninnDB 状态
 
 ```bash
-curl http://localhost:8475/api/v1/system/stats
+curl http://localhost:8475/api/health
 ```
 
 ### 测试记忆功能
@@ -265,7 +265,7 @@ muninn config set embed.api_key ${OPENAI_API_KEY}
 
 2. 检查端口是否开放：
    ```bash
-   curl http://localhost:8475/api/v1/system/stats
+   curl http://localhost:8475/api/health
    ```
 
 3. 检查 API Key 是否有效：
@@ -298,7 +298,7 @@ muninn config set embed.api_key ${OPENAI_API_KEY}
 
 查看日志确认回退：
 ```bash
-picoclaw serve --log-level debug 2>&1 | grep -i memory
+picoclaw gateway --debug 2>&1 | grep -i memory
 ```
 
 ## 生产部署建议
@@ -346,6 +346,6 @@ muninn config set metrics.port 9090
 
 ## 相关文档
 
-- [MuninnDB 官方文档](https://github.com/your-org/muninndb/docs)
+- [MuninnDB 官方文档](https://github.com/scrypster/muninndb)
 - [记忆系统架构](../llmdoc/architecture/memory-system.md)
 - [记忆配置指南](../llmdoc/guides/how-to-configure-memory.md)
