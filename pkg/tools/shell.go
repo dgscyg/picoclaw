@@ -22,6 +22,7 @@ type ExecTool struct {
 	denyPatterns        []*regexp.Regexp
 	allowPatterns       []*regexp.Regexp
 	customAllowPatterns []*regexp.Regexp
+	denyPathPatterns    []*regexp.Regexp
 	restrictToWorkspace bool
 }
 
@@ -142,6 +143,7 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 		denyPatterns:        denyPatterns,
 		allowPatterns:       nil,
 		customAllowPatterns: customAllowPatterns,
+		denyPathPatterns:    nil,
 		restrictToWorkspace: restrict,
 	}, nil
 }
@@ -326,6 +328,12 @@ func (t *ExecTool) guardCommand(command, cwd string) string {
 		}
 	}
 
+	for _, pattern := range t.denyPathPatterns {
+		if pattern.MatchString(cmd) {
+			return "Command blocked by safety guard (workspace memory files are disabled in Muninn MCP-only mode)"
+		}
+	}
+
 	if t.restrictToWorkspace {
 		if strings.Contains(cmd, "..\\") || strings.Contains(cmd, "../") {
 			return "Command blocked by safety guard (path traversal detected)"
@@ -381,3 +389,16 @@ func (t *ExecTool) SetAllowPatterns(patterns []string) error {
 	}
 	return nil
 }
+func (t *ExecTool) SetDenyPathPatterns(patterns []string) error {
+	t.denyPathPatterns = make([]*regexp.Regexp, 0, len(patterns))
+	for _, p := range patterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return fmt.Errorf("invalid deny path pattern %q: %w", p, err)
+		}
+		t.denyPathPatterns = append(t.denyPathPatterns, re)
+	}
+	return nil
+}
+
+

@@ -96,6 +96,10 @@ func NewReadFileTool(workspace string, restrict bool, allowPaths ...[]*regexp.Re
 	return &ReadFileTool{fs: buildFs(workspace, restrict, patterns)}
 }
 
+func NewReadFileToolWithDeny(workspace string, restrict bool, allowPaths []*regexp.Regexp, denyPaths []*regexp.Regexp) *ReadFileTool {
+	return &ReadFileTool{fs: buildFsWithDeny(workspace, restrict, allowPaths, denyPaths)}
+}
+
 func (t *ReadFileTool) Name() string {
 	return "read_file"
 }
@@ -140,6 +144,10 @@ func NewWriteFileTool(workspace string, restrict bool, allowPaths ...[]*regexp.R
 		patterns = allowPaths[0]
 	}
 	return &WriteFileTool{fs: buildFs(workspace, restrict, patterns)}
+}
+
+func NewWriteFileToolWithDeny(workspace string, restrict bool, allowPaths []*regexp.Regexp, denyPaths []*regexp.Regexp) *WriteFileTool {
+	return &WriteFileTool{fs: buildFsWithDeny(workspace, restrict, allowPaths, denyPaths)}
 }
 
 func (t *WriteFileTool) Name() string {
@@ -197,6 +205,10 @@ func NewListDirTool(workspace string, restrict bool, allowPaths ...[]*regexp.Reg
 	return &ListDirTool{fs: buildFs(workspace, restrict, patterns)}
 }
 
+func NewListDirToolWithDeny(workspace string, restrict bool, allowPaths []*regexp.Regexp, denyPaths []*regexp.Regexp) *ListDirTool {
+	return &ListDirTool{fs: buildFsWithDeny(workspace, restrict, allowPaths, denyPaths)}
+}
+
 func (t *ListDirTool) Name() string {
 	return "list_dir"
 }
@@ -249,6 +261,45 @@ type fileSystem interface {
 	ReadFile(path string) ([]byte, error)
 	WriteFile(path string, data []byte) error
 	ReadDir(path string) ([]os.DirEntry, error)
+}
+
+type denyFs struct {
+	inner    fileSystem
+	patterns []*regexp.Regexp
+}
+
+func (d *denyFs) matches(path string) bool {
+	for _, p := range d.patterns {
+		if p.MatchString(path) {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *denyFs) blocked(path string) error {
+	return fmt.Errorf("workspace memory files are disabled in Muninn MCP-only mode: %s", path)
+}
+
+func (d *denyFs) ReadFile(path string) ([]byte, error) {
+	if d.matches(path) {
+		return nil, d.blocked(path)
+	}
+	return d.inner.ReadFile(path)
+}
+
+func (d *denyFs) WriteFile(path string, data []byte) error {
+	if d.matches(path) {
+		return d.blocked(path)
+	}
+	return d.inner.WriteFile(path, data)
+}
+
+func (d *denyFs) ReadDir(path string) ([]os.DirEntry, error) {
+	if d.matches(path) {
+		return nil, d.blocked(path)
+	}
+	return d.inner.ReadDir(path)
 }
 
 // hostFs is an unrestricted fileReadWriter that operates directly on the host filesystem.
@@ -440,6 +491,14 @@ func buildFs(workspace string, restrict bool, patterns []*regexp.Regexp) fileSys
 	return sandbox
 }
 
+func buildFsWithDeny(workspace string, restrict bool, allowPatterns []*regexp.Regexp, denyPatterns []*regexp.Regexp) fileSystem {
+	base := buildFs(workspace, restrict, allowPatterns)
+	if len(denyPatterns) == 0 {
+		return base
+	}
+	return &denyFs{inner: base, patterns: denyPatterns}
+}
+
 // Helper to get a safe relative path for os.Root usage
 func getSafeRelPath(workspace, path string) (string, error) {
 	if workspace == "" {
@@ -461,3 +520,4 @@ func getSafeRelPath(workspace, path string) (string, error) {
 
 	return rel, nil
 }
+

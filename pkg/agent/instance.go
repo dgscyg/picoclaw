@@ -16,8 +16,6 @@ import (
 	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
-// AgentInstance represents a fully configured agent with its own workspace,
-// session manager, context builder, and tool registry.
 type AgentInstance struct {
 	ID                        string
 	Name                      string
@@ -38,82 +36,98 @@ type AgentInstance struct {
 	Subagents                 *config.SubagentsConfig
 	SkillsFilter              []string
 	Candidates                []providers.FallbackCandidate
-
-	// Router is non-nil when model routing is configured and the light model
-	// was successfully resolved. It scores each incoming message and decides
-	// whether to route to LightCandidates or stay with Candidates.
-	Router *routing.Router
-	// LightCandidates holds the resolved provider candidates for the light model.
-	// Pre-computed at agent creation to avoid repeated model_list lookups at runtime.
-	LightCandidates []providers.FallbackCandidate
+	Router                    *routing.Router
+	LightCandidates           []providers.FallbackCandidate
 }
 
-// NewAgentInstance creates an agent instance from config.
-func NewAgentInstance(
-	agentCfg *config.AgentConfig,
-	defaults *config.AgentDefaults,
-	cfg *config.Config,
-	provider providers.LLMProvider,
-) *AgentInstance {
+func NewAgentInstance(agentCfg *config.AgentConfig, defaults *config.AgentDefaults, cfg *config.Config, provider providers.LLMProvider) *AgentInstance {
 	workspace := resolveAgentWorkspace(agentCfg, defaults)
 	os.MkdirAll(workspace, 0o755)
 
 	model := resolveAgentModel(agentCfg, defaults)
 	fallbacks := resolveAgentFallbacks(agentCfg, defaults)
-
 	restrict := defaults.RestrictToWorkspace
 	readRestrict := restrict && !defaults.AllowReadOutsideWorkspace
-
-	// Compile path whitelist patterns from config.
 	allowReadPaths := compilePatterns(cfg.Tools.AllowReadPaths)
 	allowWritePaths := compilePatterns(cfg.Tools.AllowWritePaths)
+	var muninnMemoryDenyPaths []*regexp.Regexp
 
 	toolsRegistry := tools.NewToolRegistry()
-
 	memoryProvider := newMemoryProvider(cfg, workspace)
+	isMuninnMode := cfg != nil && strings.TrimSpace(cfg.Memory.Provider) == config.MemoryProviderMuninnDB
+	if isMuninnMode {
+		memoryDir := regexp.QuoteMeta(filepath.Join(workspace, "memory"))
+		muninnMemoryDenyPaths = []*regexp.Regexp{
+			regexp.MustCompile(`(?i)^` + memoryDir + `(?:$|[\\/])`),
+			regexp.MustCompile(`(?i)(?:^|[\\/])memory(?:$|[\\/])`),
+		}
+	}
 
 	if cfg.Tools.IsToolEnabled("read_file") {
-		toolsRegistry.Register(tools.NewReadFileTool(workspace, readRestrict, allowReadPaths))
+		if isMuninnMode {
+			toolsRegistry.Register(tools.NewReadFileToolWithDeny(workspace, readRestrict, allowReadPaths, muninnMemoryDenyPaths))
+		} else {
+			toolsRegistry.Register(tools.NewReadFileTool(workspace, readRestrict, allowReadPaths))
+		}
 	}
 	if cfg.Tools.IsToolEnabled("write_file") {
-		toolsRegistry.Register(tools.NewWriteFileTool(workspace, restrict, allowWritePaths))
+		if isMuninnMode {
+			toolsRegistry.Register(tools.NewWriteFileToolWithDeny(workspace, restrict, allowWritePaths, muninnMemoryDenyPaths))
+		} else {
+			toolsRegistry.Register(tools.NewWriteFileTool(workspace, restrict, allowWritePaths))
+		}
 	}
 	if cfg.Tools.IsToolEnabled("list_dir") {
-		toolsRegistry.Register(tools.NewListDirTool(workspace, readRestrict, allowReadPaths))
+		if isMuninnMode {
+			toolsRegistry.Register(tools.NewListDirToolWithDeny(workspace, readRestrict, allowReadPaths, muninnMemoryDenyPaths))
+		} else {
+			toolsRegistry.Register(tools.NewListDirTool(workspace, readRestrict, allowReadPaths))
+		}
 	}
 	if cfg.Tools.IsToolEnabled("exec") {
 		execTool, err := tools.NewExecToolWithConfig(workspace, restrict, cfg)
 		if err != nil {
 			log.Fatalf("Critical error: unable to initialize exec tool: %v", err)
 		}
+		if isMuninnMode {
+			if err := execTool.SetDenyPathPatterns([]string{`(?i)(?:^|[\\/])memory(?:$|[\\/])`, regexp.QuoteMeta(filepath.Join(workspace, "memory"))}); err != nil {
+				log.Fatalf("Critical error: unable to configure exec deny paths: %v", err)
+			}
+		}
 		toolsRegistry.Register(execTool)
 	}
-
 	if cfg.Tools.IsToolEnabled("edit_file") {
-		toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict, allowWritePaths))
+		if isMuninnMode {
+			toolsRegistry.Register(tools.NewEditFileToolWithDeny(workspace, restrict, allowWritePaths, muninnMemoryDenyPaths))
+		} else {
+			toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict, allowWritePaths))
+		}
 	}
 	if cfg.Tools.IsToolEnabled("append_file") {
-		toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict, allowWritePaths))
+		if isMuninnMode {
+			toolsRegistry.Register(tools.NewAppendFileToolWithDeny(workspace, restrict, allowWritePaths, muninnMemoryDenyPaths))
+		} else {
+			toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict, allowWritePaths))
+		}
 	}
 
-	// Register memory tools
-	if cfg.Tools.IsToolEnabled("memory_store") {
-		toolsRegistry.Register(tools.NewMemoryStoreTool(memoryProvider))
-	}
-	if cfg.Tools.IsToolEnabled("memory_recall") {
-		toolsRegistry.Register(tools.NewMemoryRecallTool(memoryProvider))
+	if !isMuninnMode {
+		if cfg.Tools.IsToolEnabled("memory_store") {
+			toolsRegistry.Register(tools.NewMemoryStoreTool(memoryProvider))
+		}
+		if cfg.Tools.IsToolEnabled("memory_recall") {
+			toolsRegistry.Register(tools.NewMemoryRecallTool(memoryProvider))
+		}
 	}
 
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
-
-	contextBuilder := NewContextBuilderWithMemory(workspace, memoryProvider)
+	contextBuilder := NewContextBuilderWithMemoryMode(workspace, memoryProvider, isMuninnMode)
 
 	agentID := routing.DefaultAgentID
 	agentName := ""
 	var subagents *config.SubagentsConfig
 	var skillsFilter []string
-
 	if agentCfg != nil {
 		agentID = routing.NormalizeAgentID(agentCfg.ID)
 		agentName = agentCfg.Name
@@ -125,38 +139,29 @@ func NewAgentInstance(
 	if maxIter == 0 {
 		maxIter = 20
 	}
-
 	maxTokens := defaults.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 8192
 	}
-
 	temperature := 0.7
 	if defaults.Temperature != nil {
 		temperature = *defaults.Temperature
 	}
-
 	var thinkingLevelStr string
 	if mc, err := cfg.GetModelConfig(model); err == nil {
 		thinkingLevelStr = mc.ThinkingLevel
 	}
 	thinkingLevel := parseThinkingLevel(thinkingLevelStr)
-
-	summarizeMessageThreshold := defaults.SummarizeMessageThreshold
-	if summarizeMessageThreshold == 0 {
-		summarizeMessageThreshold = 20
+	SummarizeMessageThreshold := defaults.SummarizeMessageThreshold
+	if SummarizeMessageThreshold == 0 {
+		SummarizeMessageThreshold = 20
+	}
+	SummarizeTokenPercent := defaults.SummarizeTokenPercent
+	if SummarizeTokenPercent == 0 {
+		SummarizeTokenPercent = 75
 	}
 
-	summarizeTokenPercent := defaults.SummarizeTokenPercent
-	if summarizeTokenPercent == 0 {
-		summarizeTokenPercent = 75
-	}
-
-	// Resolve fallback candidates
-	modelCfg := providers.ModelConfig{
-		Primary:   model,
-		Fallbacks: fallbacks,
-	}
+	modelCfg := providers.ModelConfig{Primary: model, Fallbacks: fallbacks}
 	resolveFromModelList := func(raw string) (string, bool) {
 		ensureProtocol := func(model string) string {
 			model = strings.TrimSpace(model)
@@ -168,17 +173,14 @@ func NewAgentInstance(
 			}
 			return "openai/" + model
 		}
-
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			return "", false
 		}
-
 		if cfg != nil {
 			if mc, err := cfg.GetModelConfig(raw); err == nil && mc != nil && strings.TrimSpace(mc.Model) != "" {
 				return ensureProtocol(mc.Model), true
 			}
-
 			for i := range cfg.ModelList {
 				fullModel := strings.TrimSpace(cfg.ModelList[i].Model)
 				if fullModel == "" {
@@ -193,71 +195,36 @@ func NewAgentInstance(
 				}
 			}
 		}
-
 		return "", false
 	}
-
 	candidates := providers.ResolveCandidatesWithLookup(modelCfg, defaults.Provider, resolveFromModelList)
-
-	// Model routing setup: pre-resolve light model candidates at creation time
-	// to avoid repeated model_list lookups on every incoming message.
 	var router *routing.Router
 	var lightCandidates []providers.FallbackCandidate
 	if rc := defaults.Routing; rc != nil && rc.Enabled && rc.LightModel != "" {
 		lightModelCfg := providers.ModelConfig{Primary: rc.LightModel}
 		resolved := providers.ResolveCandidatesWithLookup(lightModelCfg, defaults.Provider, resolveFromModelList)
 		if len(resolved) > 0 {
-			router = routing.New(routing.RouterConfig{
-				LightModel: rc.LightModel,
-				Threshold:  rc.Threshold,
-			})
+			router = routing.New(routing.RouterConfig{LightModel: rc.LightModel, Threshold: rc.Threshold})
 			lightCandidates = resolved
 		} else {
-			log.Printf("routing: light_model %q not found in model_list — routing disabled for agent %q",
-				rc.LightModel, agentID)
+			log.Printf("routing: light_model %q not found in model_list - routing disabled for agent %q", rc.LightModel, agentID)
 		}
 	}
 
-	return &AgentInstance{
-		ID:                        agentID,
-		Name:                      agentName,
-		Model:                     model,
-		Fallbacks:                 fallbacks,
-		Workspace:                 workspace,
-		MaxIterations:             maxIter,
-		MaxTokens:                 maxTokens,
-		Temperature:               temperature,
-		ThinkingLevel:             thinkingLevel,
-		ContextWindow:             maxTokens,
-		SummarizeMessageThreshold: summarizeMessageThreshold,
-		SummarizeTokenPercent:     summarizeTokenPercent,
-		Provider:                  provider,
-		Sessions:                  sessionsManager,
-		ContextBuilder:            contextBuilder,
-		Tools:                     toolsRegistry,
-		Subagents:                 subagents,
-		SkillsFilter:              skillsFilter,
-		Candidates:                candidates,
-		Router:                    router,
-		LightCandidates:           lightCandidates,
-	}
+	return &AgentInstance{ID: agentID, Name: agentName, Model: model, Fallbacks: fallbacks, Workspace: workspace, MaxIterations: maxIter, MaxTokens: maxTokens, Temperature: temperature, ThinkingLevel: thinkingLevel, ContextWindow: maxTokens, SummarizeMessageThreshold: SummarizeMessageThreshold, SummarizeTokenPercent: SummarizeTokenPercent, Provider: provider, Sessions: sessionsManager, ContextBuilder: contextBuilder, Tools: toolsRegistry, Subagents: subagents, SkillsFilter: skillsFilter, Candidates: candidates, Router: router, LightCandidates: lightCandidates}
 }
 
-// resolveAgentWorkspace determines the workspace directory for an agent.
 func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentDefaults) string {
 	if agentCfg != nil && strings.TrimSpace(agentCfg.Workspace) != "" {
 		return expandHome(strings.TrimSpace(agentCfg.Workspace))
 	}
-	// Use the configured default workspace (respects PICOCLAW_HOME)
 	if agentCfg == nil || agentCfg.Default || agentCfg.ID == "" || routing.NormalizeAgentID(agentCfg.ID) == "main" {
 		return expandHome(defaults.Workspace)
 	}
-	// For named agents without explicit workspace, use default workspace with agent ID suffix
 	id := routing.NormalizeAgentID(agentCfg.ID)
 	return filepath.Join(expandHome(defaults.Workspace), "..", "workspace-"+id)
 }
 
-// resolveAgentModel resolves the primary model for an agent.
 func resolveAgentModel(agentCfg *config.AgentConfig, defaults *config.AgentDefaults) string {
 	if agentCfg != nil && agentCfg.Model != nil && strings.TrimSpace(agentCfg.Model.Primary) != "" {
 		return strings.TrimSpace(agentCfg.Model.Primary)
@@ -265,7 +232,6 @@ func resolveAgentModel(agentCfg *config.AgentConfig, defaults *config.AgentDefau
 	return defaults.GetModelName()
 }
 
-// resolveAgentFallbacks resolves the fallback models for an agent.
 func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentDefaults) []string {
 	if agentCfg != nil && agentCfg.Model != nil && agentCfg.Model.Fallbacks != nil {
 		return agentCfg.Model.Fallbacks
@@ -275,52 +241,24 @@ func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentD
 
 func newMemoryProvider(cfg *config.Config, workspace string) MemoryProvider {
 	if cfg == nil {
-		logger.InfoCF("agent", "Initialized memory backend", map[string]any{
-			"provider":  config.MemoryProviderFile,
-			"workspace": workspace,
-		})
+		logger.InfoCF("agent", "Initialized memory backend", map[string]any{"provider": config.MemoryProviderFile, "workspace": workspace})
 		return NewFileMemoryStore(workspace)
 	}
-
 	providerName := strings.TrimSpace(cfg.Memory.Provider)
 	if providerName == "" {
 		providerName = config.MemoryProviderFile
 	}
-
 	switch providerName {
 	case config.MemoryProviderMuninnDB:
-		store, err := NewMuninnDBMemoryStore(cfg.Memory.MuninnDB, workspace)
-		if err != nil {
-			logger.WarnCF("agent", "Failed to initialize MuninnDB memory backend, falling back to file memory", map[string]any{
-				"provider":  providerName,
-				"workspace": workspace,
-				"error":     err.Error(),
-			})
-			logger.InfoCF("agent", "Initialized memory backend", map[string]any{
-				"provider":      config.MemoryProviderFile,
-				"workspace":     workspace,
-				"fallback_from": providerName,
-			})
-			return NewFileMemoryStore(workspace)
-		}
-		logger.InfoCF("agent", "Initialized memory backend", map[string]any{
-			"provider":  providerName,
-			"workspace": workspace,
-		})
-		return store
+		logger.InfoCF("agent", "Initialized Muninn memory mode via MCP", map[string]any{"provider": providerName, "workspace": workspace})
+		return NewNoopMemoryStore()
 	case "", config.MemoryProviderFile:
 		fallthrough
 	default:
 		if providerName != config.MemoryProviderFile {
-			logger.WarnCF("agent", "Unknown memory backend, falling back to file memory", map[string]any{
-				"provider":  providerName,
-				"workspace": workspace,
-			})
+			logger.WarnCF("agent", "Unknown memory backend, falling back to file memory", map[string]any{"provider": providerName, "workspace": workspace})
 		}
-		logger.InfoCF("agent", "Initialized memory backend", map[string]any{
-			"provider":  config.MemoryProviderFile,
-			"workspace": workspace,
-		})
+		logger.InfoCF("agent", "Initialized memory backend", map[string]any{"provider": config.MemoryProviderFile, "workspace": workspace})
 		return NewFileMemoryStore(workspace)
 	}
 }
@@ -351,3 +289,4 @@ func expandHome(path string) string {
 	}
 	return path
 }
+

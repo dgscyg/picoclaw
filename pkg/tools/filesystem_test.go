@@ -329,11 +329,11 @@ func TestRootMkdirAll(t *testing.T) {
 	_, err = os.Stat(filepath.Join(workspace, "a/b/c/d"))
 	assert.NoError(t, err)
 
-	// Case 3: Already exists — must be idempotent
+	// Case 3: Already exists - must be idempotent
 	err = root.MkdirAll("a/b/c/d", 0o755)
 	assert.NoError(t, err)
 
-	// Case 4: A regular file blocks directory creation — must error
+	// Case 4: A regular file blocks directory creation - must error
 	err = os.WriteFile(filepath.Join(workspace, "file_exists"), []byte("data"), 0o644)
 	assert.NoError(t, err)
 	err = root.MkdirAll("file_exists", 0o755)
@@ -520,3 +520,28 @@ func TestWhitelistFs_AllowsMatchingPaths(t *testing.T) {
 		t.Errorf("expected non-whitelisted path to be blocked, got: %s", result.ForLLM)
 	}
 }
+func TestFilesystemTool_MuninnDeny_ReadFile(t *testing.T) {
+	workspace := t.TempDir()
+	tool := NewReadFileToolWithDeny(workspace, true, nil, []*regexp.Regexp{regexp.MustCompile(`(?i)(?:^|[\\/])memory(?:$|[\\/])`)})
+	result := tool.Execute(context.Background(), map[string]any{"path": filepath.Join(workspace, "memory", "MEMORY.md")})
+	if !result.IsError {
+		t.Fatalf("expected workspace memory read to be blocked")
+	}
+	if !strings.Contains(result.ForLLM, "disabled in Muninn MCP-only mode") {
+		t.Fatalf("unexpected error: %s", result.ForLLM)
+	}
+}
+
+func TestFilesystemTool_MuninnDeny_ListDir(t *testing.T) {
+	workspace := t.TempDir()
+	tool := NewListDirToolWithDeny(workspace, true, nil, []*regexp.Regexp{regexp.MustCompile(`(?i)(?:^|[\\/])memory(?:$|[\\/])`)})
+	result := tool.Execute(context.Background(), map[string]any{"path": filepath.Join(workspace, "memory")})
+	if !result.IsError {
+		t.Fatalf("expected workspace memory list to be blocked")
+	}
+	if !strings.Contains(result.ForLLM, "disabled in Muninn MCP-only mode") {
+		t.Fatalf("unexpected error: %s", result.ForLLM)
+	}
+}
+
+

@@ -24,6 +24,10 @@ func NewEditFileTool(workspace string, restrict bool, allowPaths ...[]*regexp.Re
 	return &EditFileTool{fs: buildFs(workspace, restrict, patterns)}
 }
 
+func NewEditFileToolWithDeny(workspace string, restrict bool, allowPaths []*regexp.Regexp, denyPaths []*regexp.Regexp) *EditFileTool {
+	return &EditFileTool{fs: buildFsWithDeny(workspace, restrict, allowPaths, denyPaths)}
+}
+
 func (t *EditFileTool) Name() string {
 	return "edit_file"
 }
@@ -85,6 +89,10 @@ func NewAppendFileTool(workspace string, restrict bool, allowPaths ...[]*regexp.
 		patterns = allowPaths[0]
 	}
 	return &AppendFileTool{fs: buildFs(workspace, restrict, patterns)}
+}
+
+func NewAppendFileToolWithDeny(workspace string, restrict bool, allowPaths []*regexp.Regexp, denyPaths []*regexp.Regexp) *AppendFileTool {
+	return &AppendFileTool{fs: buildFsWithDeny(workspace, restrict, allowPaths, denyPaths)}
 }
 
 func (t *AppendFileTool) Name() string {
@@ -172,3 +180,4 @@ func replaceEditContent(content []byte, oldText, newText string) ([]byte, error)
 	newContent := strings.Replace(contentStr, oldText, newText, 1)
 	return []byte(newContent), nil
 }
+

@@ -443,3 +443,21 @@ func TestShellTool_CustomAllowPatterns(t *testing.T) {
 		t.Errorf("'git push upstream main' should still be blocked by deny pattern")
 	}
 }
+func TestShellTool_MuninnDenyPathPatterns(t *testing.T) {
+	workspace := t.TempDir()
+	tool, err := NewExecTool(workspace, true)
+	if err != nil {
+		t.Fatalf("unable to configure exec tool: %s", err)
+	}
+	if err := tool.SetDenyPathPatterns([]string{`(?i)(?:^|[\\/])memory(?:$|[\\/])`}); err != nil {
+		t.Fatalf("failed to configure deny paths: %v", err)
+	}
+	result := tool.Execute(context.Background(), map[string]any{"command": "Get-Content .\\memory\\MEMORY.md"})
+	if !result.IsError {
+		t.Fatalf("expected memory path command to be blocked")
+	}
+	if !strings.Contains(result.ForLLM, "disabled in Muninn MCP-only mode") {
+		t.Fatalf("unexpected error: %s", result.ForLLM)
+	}
+}
+
