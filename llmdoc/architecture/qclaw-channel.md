@@ -114,7 +114,7 @@ type QClawConfig struct {
 }
 ```
 
-### Example Configuration
+### Example Configuration`r`n`r`nJSON config currently uses raw `time.Duration` values, so examples below are shown in nanoseconds.
 
 ```json
 {
@@ -125,8 +125,8 @@ type QClawConfig struct {
       "websocket_url": "wss://mmgrcalltoken.3g.qq.com/agentwss",
       "user_id": "your-user-id",
       "allow_from": ["user1", "user2"],
-      "heartbeat_interval": "20s",
-      "reconnect_interval": "3s"
+      "heartbeat_interval": 20000000000,
+      "reconnect_interval": 3000000000
     }
   }
 }

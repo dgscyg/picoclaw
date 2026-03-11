@@ -223,8 +223,8 @@
       "environment": "production",
       "auth_state_path": "",
       "allow_from": [],
-      "heartbeat_interval": "20s",
-      "reconnect_interval": "3s",
+      "heartbeat_interval": 20000000000,
+      "reconnect_interval": 3000000000,
       "max_reconnects": 0
     },
     "irc": {
