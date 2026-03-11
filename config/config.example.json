@@ -11,6 +11,19 @@
       "summarize_token_percent": 75
     }
   },
+  "memory": {
+    "provider": "file",
+    "file": {
+      "workspace": "~/.picoclaw/workspace"
+    },
+    "muninndb": {
+      "endpoint": "http://localhost:8475",
+      "vault": "picoclaw",
+      "api_key": "${MUNINNDB_API_KEY}",
+      "timeout": "30s",
+      "fallback_to_file": true
+    }
+  },
   "model_list": [
     {
       "model_name": "gpt4",
@@ -200,6 +213,19 @@
       },
       "welcome_message": "",
       "reasoning_channel_id": ""
+    },
+    "qclaw": {
+      "enabled": false,
+      "token": "YOUR_QCLAW_TOKEN",
+      "websocket_url": "wss://mmgrcalltoken.3g.qq.com/agentwss",
+      "guid": "",
+      "user_id": "",
+      "environment": "production",
+      "auth_state_path": "",
+      "allow_from": [],
+      "heartbeat_interval": "20s",
+      "reconnect_interval": "3s",
+      "max_reconnects": 0
     },
     "irc": {
       "enabled": false,
@@ -448,6 +474,12 @@
       "enabled": true
     },
     "message": {
+      "enabled": true
+    },
+    "memory_recall": {
+      "enabled": true
+    },
+    "memory_store": {
       "enabled": true
     },
     "read_file": {
