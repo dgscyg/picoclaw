@@ -2,12 +2,12 @@ package agent
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"net/http"
-	"net/http/httptest"
 
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/muninndb"
@@ -126,13 +126,13 @@ func TestMuninnDBMemoryStoreConfigValidation(t *testing.T) {
 		{
 			name:    "missing endpoint",
 			cfg:     &config.MuninnDBConfig{},
-			wantErr: "muninndb endpoint is required",
+			wantErr: "muninndb mcp endpoint is required",
 		},
 		{
 			name: "invalid timeout",
 			cfg: &config.MuninnDBConfig{
-				Endpoint: "http://127.0.0.1:8080",
-				Timeout:  "invalid",
+				MCPEndpoint: "http://127.0.0.1:8080",
+				Timeout:     "invalid",
 			},
 			wantErr: "parse muninndb timeout",
 		},
@@ -163,4 +163,3 @@ func TestNewMemoryProviderFallsBackToFile(t *testing.T) {
 		t.Fatalf("provider type = %T, want *FileMemoryStore", provider)
 	}
 }
-

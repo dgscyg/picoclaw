@@ -173,11 +173,11 @@ type SessionConfig struct {
 // (message length, code blocks, tool call history, conversation depth, attachments).
 // Messages scoring below Threshold are sent to LightModel; all others use the
 // agent's primary model. This reduces cost and latency for simple tasks without
-// requiring any keyword matching — all scoring is language-agnostic.
+// requiring any keyword matching 鈥?all scoring is language-agnostic.
 type RoutingConfig struct {
 	Enabled    bool    `json:"enabled"`
 	LightModel string  `json:"light_model"` // model_name from model_list to use for simple tasks
-	Threshold  float64 `json:"threshold"`   // complexity score in [0,1]; score >= threshold → primary model
+	Threshold  float64 `json:"threshold"`   // complexity score in [0,1]; score >= threshold 鈫?primary model
 }
 
 type AgentDefaults struct {
@@ -476,21 +476,21 @@ type IRCConfig struct {
 // QClaw uses the AGP (Agent Gateway Protocol) over WebSocket for bidirectional
 // communication with the QClaw backend.
 type QClawConfig struct {
-	Enabled            bool                `json:"enabled"                env:"PICOCLAW_CHANNELS_QCLAW_ENABLED"`
-	Token              string              `json:"token"                  env:"PICOCLAW_CHANNELS_QCLAW_TOKEN"`
-	WebSocketURL       string              `json:"websocket_url"          env:"PICOCLAW_CHANNELS_QCLAW_WEBSOCKET_URL"`
-	GUID               string              `json:"guid"                   env:"PICOCLAW_CHANNELS_QCLAW_GUID"`
-	UserID             string              `json:"user_id"                env:"PICOCLAW_CHANNELS_QCLAW_USER_ID"`
-	Environment        string              `json:"environment"            env:"PICOCLAW_CHANNELS_QCLAW_ENVIRONMENT"`
-	AuthStatePath      string              `json:"auth_state_path"        env:"PICOCLAW_CHANNELS_QCLAW_AUTH_STATE_PATH"`
-	BypassInvite       bool                `json:"bypass_invite"          env:"PICOCLAW_CHANNELS_QCLAW_BYPASS_INVITE"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"             env:"PICOCLAW_CHANNELS_QCLAW_ALLOW_FROM"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	Placeholder        PlaceholderConfig   `json:"placeholder,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"   env:"PICOCLAW_CHANNELS_QCLAW_REASONING_CHANNEL_ID"`
-	HeartbeatInterval  int                 `json:"heartbeat_interval"     env:"PICOCLAW_CHANNELS_QCLAW_HEARTBEAT_INTERVAL"`
-	ReconnectInterval  int                 `json:"reconnect_interval"     env:"PICOCLAW_CHANNELS_QCLAW_RECONNECT_INTERVAL"`
-	MaxReconnects      int                 `json:"max_reconnects"         env:"PICOCLAW_CHANNELS_QCLAW_MAX_RECONNECTS"`
+	Enabled            bool                          `json:"enabled"                env:"PICOCLAW_CHANNELS_QCLAW_ENABLED"`
+	Token              string                        `json:"token"                  env:"PICOCLAW_CHANNELS_QCLAW_TOKEN"`
+	WebSocketURL       string                        `json:"websocket_url"          env:"PICOCLAW_CHANNELS_QCLAW_WEBSOCKET_URL"`
+	GUID               string                        `json:"guid"                   env:"PICOCLAW_CHANNELS_QCLAW_GUID"`
+	UserID             string                        `json:"user_id"                env:"PICOCLAW_CHANNELS_QCLAW_USER_ID"`
+	Environment        string                        `json:"environment"            env:"PICOCLAW_CHANNELS_QCLAW_ENVIRONMENT"`
+	AuthStatePath      string                        `json:"auth_state_path"        env:"PICOCLAW_CHANNELS_QCLAW_AUTH_STATE_PATH"`
+	BypassInvite       bool                          `json:"bypass_invite"          env:"PICOCLAW_CHANNELS_QCLAW_BYPASS_INVITE"`
+	AllowFrom          FlexibleStringSlice           `json:"allow_from"             env:"PICOCLAW_CHANNELS_QCLAW_ALLOW_FROM"`
+	GroupTrigger       GroupTriggerConfig            `json:"group_trigger,omitempty"`
+	Placeholder        PlaceholderConfig             `json:"placeholder,omitempty"`
+	ReasoningChannelID string                        `json:"reasoning_channel_id"   env:"PICOCLAW_CHANNELS_QCLAW_REASONING_CHANNEL_ID"`
+	HeartbeatInterval  int                           `json:"heartbeat_interval"     env:"PICOCLAW_CHANNELS_QCLAW_HEARTBEAT_INTERVAL"`
+	ReconnectInterval  int                           `json:"reconnect_interval"     env:"PICOCLAW_CHANNELS_QCLAW_RECONNECT_INTERVAL"`
+	MaxReconnects      int                           `json:"max_reconnects"         env:"PICOCLAW_CHANNELS_QCLAW_MAX_RECONNECTS"`
 	Accounts           map[string]QClawAccountConfig `json:"accounts,omitempty"`
 }
 
@@ -839,6 +839,8 @@ func LoadConfig(path string) (*Config, error) {
 	if err := cfg.ValidateModelList(); err != nil {
 		return nil, err
 	}
+	EnsureMuninnMCPConfig(cfg)
+
 	if err := cfg.Memory.Validate(); err != nil {
 		return nil, err
 	}

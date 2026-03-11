@@ -11,9 +11,9 @@ const (
 	MemoryProviderMuninnDB = "muninndb"
 	DefaultMemoryTimeout   = "30s"
 	DefaultMemoryVault     = "default"
+	DefaultMuninnMCPName   = "muninn"
 )
 
-// MemoryConfig 定义记忆系统配置。
 type MemoryConfig struct {
 	Provider string            `json:"provider"`
 	File     *FileMemoryConfig `json:"file,omitempty"`
@@ -25,11 +25,10 @@ type FileMemoryConfig struct {
 }
 
 type MuninnDBConfig struct {
-	Endpoint       string `json:"endpoint"`
-	Vault          string `json:"vault"`
-	APIKey         string `json:"api_key"`
-	Timeout        string `json:"timeout"`
-	FallbackToFile bool   `json:"fallback_to_file"`
+	MCPEndpoint string `json:"mcp_endpoint"`
+	Vault       string `json:"vault"`
+	APIKey      string `json:"api_key"`
+	Timeout     string `json:"timeout"`
 }
 
 func (c *MemoryConfig) ApplyDefaults() {
@@ -58,7 +57,7 @@ func (c *MemoryConfig) ExpandEnvVars() {
 		c.File.Workspace = expandEnvVars(c.File.Workspace)
 	}
 	if c.MuninnDB != nil {
-		c.MuninnDB.Endpoint = expandEnvVars(c.MuninnDB.Endpoint)
+		c.MuninnDB.MCPEndpoint = expandEnvVars(c.MuninnDB.MCPEndpoint)
 		c.MuninnDB.Vault = expandEnvVars(c.MuninnDB.Vault)
 		c.MuninnDB.APIKey = expandEnvVars(c.MuninnDB.APIKey)
 		c.MuninnDB.Timeout = expandEnvVars(c.MuninnDB.Timeout)
@@ -76,8 +75,8 @@ func (c *MemoryConfig) Validate() error {
 		if c.MuninnDB == nil {
 			return fmt.Errorf("memory.muninndb is required when memory.provider is %q", MemoryProviderMuninnDB)
 		}
-		if strings.TrimSpace(c.MuninnDB.Endpoint) == "" {
-			return fmt.Errorf("memory.muninndb.endpoint is required when memory.provider is %q", MemoryProviderMuninnDB)
+		if strings.TrimSpace(c.MuninnDB.MCPEndpoint) == "" {
+			return fmt.Errorf("memory.muninndb.mcp_endpoint is required when memory.provider is %q", MemoryProviderMuninnDB)
 		}
 		if strings.TrimSpace(c.MuninnDB.Vault) == "" {
 			return fmt.Errorf("memory.muninndb.vault is required when memory.provider is %q", MemoryProviderMuninnDB)
@@ -88,7 +87,30 @@ func (c *MemoryConfig) Validate() error {
 	}
 }
 
-// expandEnvVars 展开字符串中的环境变量引用。
+func EnsureMuninnMCPConfig(cfg *Config) {
+	if cfg == nil || strings.TrimSpace(cfg.Memory.Provider) != MemoryProviderMuninnDB {
+		return
+	}
+	if !cfg.Tools.MCP.Enabled {
+		cfg.Tools.MCP.Enabled = true
+	}
+	if cfg.Tools.MCP.Servers == nil {
+		cfg.Tools.MCP.Servers = map[string]MCPServerConfig{}
+	}
+	if _, exists := cfg.Tools.MCP.Servers[DefaultMuninnMCPName]; exists {
+		return
+	}
+	server := MCPServerConfig{
+		Enabled: true,
+		Type:    "http",
+		URL:     strings.TrimSpace(cfg.Memory.MuninnDB.MCPEndpoint),
+	}
+	if token := strings.TrimSpace(cfg.Memory.MuninnDB.APIKey); token != "" {
+		server.Headers = map[string]string{"Authorization": "Bearer " + token}
+	}
+	cfg.Tools.MCP.Servers[DefaultMuninnMCPName] = server
+}
+
 func expandEnvVars(s string) string {
 	if strings.HasPrefix(s, "${") && strings.HasSuffix(s, "}") {
 		envVar := s[2 : len(s)-1]

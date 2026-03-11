@@ -131,6 +131,122 @@ func TestClientWriteEngram(t *testing.T) {
 	}
 }
 
+func TestClientLink(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/link" {
+			t.Fatalf("path = %s, want /api/link", r.URL.Path)
+		}
+		var got LinkRequest
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if got.Vault != "test-vault" || got.SourceID != "a1" || got.TargetID != "b2" || got.Relation != "supports" {
+			t.Fatalf("unexpected request: %+v", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true,"edge_id":"edge-1"}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithHTTPClient(server.Client(), server.URL, "test-vault", "secret")
+	resp, err := client.Link(context.Background(), "a1", "b2", "supports", 0.8)
+	if err != nil {
+		t.Fatalf("Link() error = %v", err)
+	}
+	if resp == nil || !resp.OK || resp.EdgeID != "edge-1" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestClientTraverse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/traverse" {
+			t.Fatalf("path = %s, want /api/traverse", r.URL.Path)
+		}
+		var got TraverseRequest
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if got.Vault != "test-vault" || got.StartID != "root-1" || got.MaxDepth != 2 || got.Limit != 3 {
+			t.Fatalf("unexpected request: %+v", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"summary":"2 related nodes","nodes":[{"id":"n1","content":"child memory","depth":1}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithHTTPClient(server.Client(), server.URL, "test-vault", "secret")
+	resp, err := client.Traverse(context.Background(), TraverseRequest{StartID: "root-1", MaxDepth: 2, Limit: 3})
+	if err != nil {
+		t.Fatalf("Traverse() error = %v", err)
+	}
+	if resp == nil || len(resp.Nodes) != 1 || resp.Nodes[0].ID != "n1" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestClientExplain(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/explain" {
+			t.Fatalf("path = %s, want /api/explain", r.URL.Path)
+		}
+		var got ExplainRequest
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if got.Vault != "test-vault" || got.EngramID != "eng-1" {
+			t.Fatalf("unexpected request: %+v", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"engram_id":"eng-1","summary":"high recency","factors":[{"name":"recency","value":0.9}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithHTTPClient(server.Client(), server.URL, "test-vault", "secret")
+	resp, err := client.Explain(context.Background(), ExplainRequest{EngramID: "eng-1"})
+	if err != nil {
+		t.Fatalf("Explain() error = %v", err)
+	}
+	if resp == nil || resp.EngramID != "eng-1" || len(resp.Factors) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestClientContradictions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/contradictions" {
+			t.Fatalf("path = %s, want /api/contradictions", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("vault"); got != "test-vault" {
+			t.Fatalf("vault query = %q, want test-vault", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"items":[{"left_id":"a1","right_id":"b2","reason":"conflicting claims","score":0.88}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithHTTPClient(server.Client(), server.URL, "test-vault", "secret")
+	resp, err := client.Contradictions(context.Background())
+	if err != nil {
+		t.Fatalf("Contradictions() error = %v", err)
+	}
+	if resp == nil || len(resp.Items) != 1 || resp.Items[0].LeftID != "a1" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
 func TestClientContextCancel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)

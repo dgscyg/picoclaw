@@ -71,6 +71,90 @@ type WriteResponse struct {
 	Hint      string `json:"hint,omitempty"`
 }
 
+// LinkRequest creates or updates a semantic relationship between two engrams.
+type LinkRequest struct {
+	Vault    string  `json:"vault"`
+	SourceID string  `json:"source_id"`
+	TargetID string  `json:"target_id"`
+	Relation string  `json:"relation"`
+	Weight   float64 `json:"weight,omitempty"`
+}
+
+// LinkResponse represents the result of linking two engrams.
+type LinkResponse struct {
+	OK      bool   `json:"ok,omitempty"`
+	EdgeID  string `json:"edge_id,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// TraverseRequest explores the memory graph starting from an engram or query.
+type TraverseRequest struct {
+	Vault      string   `json:"vault"`
+	StartID    string   `json:"start_id,omitempty"`
+	Query      string   `json:"query,omitempty"`
+	Directions []string `json:"directions,omitempty"`
+	Relations  []string `json:"relations,omitempty"`
+	MaxDepth   int      `json:"max_depth,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
+}
+
+// TraverseNode represents an engram returned by graph traversal.
+type TraverseNode struct {
+	ID      string   `json:"id"`
+	Concept string   `json:"concept,omitempty"`
+	Content string   `json:"content,omitempty"`
+	Path    []string `json:"path,omitempty"`
+	Depth   int      `json:"depth,omitempty"`
+	Score   float64  `json:"score,omitempty"`
+}
+
+// TraverseResponse contains graph traversal results.
+type TraverseResponse struct {
+	Nodes   []TraverseNode `json:"nodes,omitempty"`
+	Summary string         `json:"summary,omitempty"`
+}
+
+// ExplainRequest requests explanation for an engram or recall query.
+type ExplainRequest struct {
+	Vault    string `json:"vault"`
+	EngramID string `json:"engram_id,omitempty"`
+	Query    string `json:"query,omitempty"`
+}
+
+// ExplainFactor describes one explanation component.
+type ExplainFactor struct {
+	Name   string  `json:"name,omitempty"`
+	Value  float64 `json:"value,omitempty"`
+	Detail string  `json:"detail,omitempty"`
+}
+
+// ExplainResponse contains an explanation of why a memory was relevant.
+type ExplainResponse struct {
+	EngramID string          `json:"engram_id,omitempty"`
+	Summary  string          `json:"summary,omitempty"`
+	Why      string          `json:"why,omitempty"`
+	Factors  []ExplainFactor `json:"factors,omitempty"`
+}
+
+// ContradictionItem describes a contradiction pair or cluster reported by MuninnDB.
+type ContradictionItem struct {
+	ID         string   `json:"id,omitempty"`
+	LeftID     string   `json:"left_id,omitempty"`
+	RightID    string   `json:"right_id,omitempty"`
+	LeftText   string   `json:"left_text,omitempty"`
+	RightText  string   `json:"right_text,omitempty"`
+	Reason     string   `json:"reason,omitempty"`
+	Score      float64  `json:"score,omitempty"`
+	EngramIDs  []string `json:"engram_ids,omitempty"`
+	Summary    string   `json:"summary,omitempty"`
+	Resolution string   `json:"resolution,omitempty"`
+}
+
+// ContradictionsResponse contains contradiction inspection results.
+type ContradictionsResponse struct {
+	Items []ContradictionItem `json:"items,omitempty"`
+}
+
 // InlineEntity is a caller-provided entity for inline enrichment.
 type InlineEntity struct {
 	Name string `json:"name"`

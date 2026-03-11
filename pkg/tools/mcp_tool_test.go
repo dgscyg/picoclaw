@@ -490,3 +490,20 @@ func TestMCPTool_Parameters_MapSchema(t *testing.T) {
 		t.Errorf("Name type should be 'string', got '%v'", nameParam["type"])
 	}
 }
+
+func TestMergeMCPArgs_ForcedOverridesProvided(t *testing.T) {
+	merged := mergeMCPArgs(
+		map[string]any{"threshold": 0.5},
+		map[string]any{"vault": "picoclaw"},
+		map[string]any{"vault": "default", "limit": 10},
+	)
+	if merged["vault"] != "picoclaw" {
+		t.Fatalf("vault = %v, want picoclaw", merged["vault"])
+	}
+	if merged["limit"] != 10 {
+		t.Fatalf("limit = %v, want 10", merged["limit"])
+	}
+	if merged["threshold"] != 0.5 {
+		t.Fatalf("threshold = %v, want 0.5", merged["threshold"])
+	}
+}

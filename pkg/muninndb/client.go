@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -75,6 +76,59 @@ func (c *Client) WriteEngram(ctx context.Context, content string, tags []string,
 
 	var resp WriteResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/api/engrams", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// Link creates or updates a semantic relationship between two engrams.
+func (c *Client) Link(ctx context.Context, sourceID, targetID, relation string, weight float64) (*LinkResponse, error) {
+	req := LinkRequest{
+		Vault:    c.vault,
+		SourceID: sourceID,
+		TargetID: targetID,
+		Relation: relation,
+		Weight:   weight,
+	}
+
+	var resp LinkResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/api/link", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// Traverse explores related engrams starting from a seed engram or query.
+func (c *Client) Traverse(ctx context.Context, req TraverseRequest) (*TraverseResponse, error) {
+	req.Vault = c.vault
+
+	var resp TraverseResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/api/traverse", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// Explain returns a relevance explanation for an engram or query.
+func (c *Client) Explain(ctx context.Context, req ExplainRequest) (*ExplainResponse, error) {
+	req.Vault = c.vault
+
+	var resp ExplainResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/api/explain", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// Contradictions returns contradiction inspection results for the current vault.
+func (c *Client) Contradictions(ctx context.Context) (*ContradictionsResponse, error) {
+	path := "/api/contradictions"
+	if c.vault != "" {
+		path += "?vault=" + url.QueryEscape(c.vault)
+	}
+
+	var resp ContradictionsResponse
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

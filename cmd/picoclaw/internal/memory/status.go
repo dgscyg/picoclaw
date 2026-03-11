@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -32,15 +31,13 @@ func newStatusCommand() *cobra.Command {
 				if cfg.Memory.MuninnDB == nil {
 					return fmt.Errorf("memory.muninndb config is required")
 				}
-				cmd.Printf("Endpoint: %s\n", cfg.Memory.MuninnDB.Endpoint)
+				cmd.Printf("MCP Endpoint: %s\n", cfg.Memory.MuninnDB.MCPEndpoint)
 				cmd.Printf("Vault: %s\n", cfg.Memory.MuninnDB.Vault)
-				cmd.Printf("Fallback to file: %t\n", cfg.Memory.MuninnDB.FallbackToFile)
-
-				if _, err := recallMemories(context.Background(), cfg, "", 1); err != nil {
-					cmd.Printf("Status: error (%v)\n", err)
-					return err
+				cmd.Printf("MCP Enabled: %t\n", cfg.Tools.MCP.Enabled)
+				if server, ok := cfg.Tools.MCP.Servers[config.DefaultMuninnMCPName]; ok {
+					cmd.Printf("MCP Server URL: %s\n", server.URL)
 				}
-				cmd.Println("Status: connected")
+				cmd.Println("Status: configured for Muninn MCP mode")
 				return nil
 			default:
 				return fmt.Errorf("unsupported memory provider %q", cfg.Memory.Provider)
