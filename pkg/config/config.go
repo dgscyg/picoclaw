@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"sync/atomic"
-	"time"
 
 	"github.com/caarlos0/env/v11"
 
@@ -489,8 +488,8 @@ type QClawConfig struct {
 	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
 	Placeholder        PlaceholderConfig   `json:"placeholder,omitempty"`
 	ReasoningChannelID string              `json:"reasoning_channel_id"   env:"PICOCLAW_CHANNELS_QCLAW_REASONING_CHANNEL_ID"`
-	HeartbeatInterval  time.Duration       `json:"heartbeat_interval"     env:"PICOCLAW_CHANNELS_QCLAW_HEARTBEAT_INTERVAL"`
-	ReconnectInterval  time.Duration       `json:"reconnect_interval"     env:"PICOCLAW_CHANNELS_QCLAW_RECONNECT_INTERVAL"`
+	HeartbeatInterval  int                 `json:"heartbeat_interval"     env:"PICOCLAW_CHANNELS_QCLAW_HEARTBEAT_INTERVAL"`
+	ReconnectInterval  int                 `json:"reconnect_interval"     env:"PICOCLAW_CHANNELS_QCLAW_RECONNECT_INTERVAL"`
 	MaxReconnects      int                 `json:"max_reconnects"         env:"PICOCLAW_CHANNELS_QCLAW_MAX_RECONNECTS"`
 	Accounts           map[string]QClawAccountConfig `json:"accounts,omitempty"`
 }

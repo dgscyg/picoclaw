@@ -65,8 +65,8 @@ picoclaw gateway
 | `environment` | string | `production` | `production` or `test` |
 | `auth_state_path` | string | `~/.picoclaw/qclaw-auth.json` | Path to auth state file |
 | `allow_from` | []string | `[]` | Allowed user IDs (empty = all allowed) |
-| `heartbeat_interval` | duration(ns) | `20000000000` | WebSocket heartbeat interval (20s in nanoseconds) |
-| `reconnect_interval` | duration(ns) | `3000000000` | Base reconnection delay (3s in nanoseconds) |
+| `heartbeat_interval` | int | `20` | WebSocket heartbeat interval in seconds |
+| `reconnect_interval` | int | `3` | Base reconnection delay in seconds |
 | `max_reconnects` | int | `0` | Max reconnect attempts (0 = unlimited) |
 
 ### Full Configuration Example
@@ -86,8 +86,8 @@ picoclaw gateway
         "mention_only": false,
         "prefixes": ["/ai", "/bot"]
       },
-      "heartbeat_interval": 20000000000,
-      "reconnect_interval": 3000000000,
+      "heartbeat_interval": 20,
+      "reconnect_interval": 3,
       "max_reconnects": 0
     }
   }

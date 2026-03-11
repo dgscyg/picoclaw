@@ -108,13 +108,15 @@ type QClawConfig struct {
     AuthStatePath      string              `json:"auth_state_path"`    // Custom auth state file path
     AllowFrom          FlexibleStringSlice `json:"allow_from"`         // User allowlist
     GroupTrigger       GroupTriggerConfig  `json:"group_trigger"`      // Group chat trigger config
-    HeartbeatInterval  time.Duration       `json:"heartbeat_interval"` // Default: 20s
-    ReconnectInterval  time.Duration       `json:"reconnect_interval"` // Default: 3s
+    HeartbeatInterval  int                 `json:"heartbeat_interval"` // Seconds, default: 20
+    ReconnectInterval  int                 `json:"reconnect_interval"` // Seconds, default: 3
     MaxReconnects      int                 `json:"max_reconnects"`     // 0 = unlimited
 }
 ```
 
-### Example Configuration`r`n`r`nJSON config currently uses raw `time.Duration` values, so examples below are shown in nanoseconds.
+### Example Configuration
+
+JSON config uses integer seconds for these fields.
 
 ```json
 {
@@ -125,8 +127,8 @@ type QClawConfig struct {
       "websocket_url": "wss://mmgrcalltoken.3g.qq.com/agentwss",
       "user_id": "your-user-id",
       "allow_from": ["user1", "user2"],
-      "heartbeat_interval": 20000000000,
-      "reconnect_interval": 3000000000
+      "heartbeat_interval": 20,
+      "reconnect_interval": 3
     }
   }
 }

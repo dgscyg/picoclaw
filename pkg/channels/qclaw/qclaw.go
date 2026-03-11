@@ -107,10 +107,10 @@ func NewQClawChannel(cfg config.QClawConfig, messageBus *bus.MessageBus) (*QClaw
 		cfg.GUID = GenerateDeviceGUID()
 	}
 	if cfg.HeartbeatInterval == 0 {
-		cfg.HeartbeatInterval = DefaultHeartbeatInterval
+		cfg.HeartbeatInterval = int(DefaultHeartbeatInterval / time.Second)
 	}
 	if cfg.ReconnectInterval == 0 {
-		cfg.ReconnectInterval = DefaultReconnectInterval
+		cfg.ReconnectInterval = int(DefaultReconnectInterval / time.Second)
 	}
 
 	base := channels.NewBaseChannel(
@@ -167,8 +167,8 @@ func (c *QClawChannel) Start(ctx context.Context) error {
 		c.config.UserID,
 		c, // QClawChannel implements WebSocketClientCallbacks
 	)
-	c.wsClient.heartbeatInterval = c.config.HeartbeatInterval
-	c.wsClient.reconnectInterval = c.config.ReconnectInterval
+	c.wsClient.heartbeatInterval = time.Duration(c.config.HeartbeatInterval) * time.Second
+	c.wsClient.reconnectInterval = time.Duration(c.config.ReconnectInterval) * time.Second
 	c.wsClient.maxReconnects = c.config.MaxReconnects
 
 	if err := c.wsClient.Start(c.ctx); err != nil {
