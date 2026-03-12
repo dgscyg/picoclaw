@@ -120,6 +120,8 @@ PicoClaw 当前在 `wecom_official` 中已经接通第一层卡片能力：
 - 回调内首个正式流式帧走 `stream_with_template_card` 挂卡片，最终仍由普通 `replyStream` 收尾。
 - 欢迎语可按卡片模式回复。
 
+如果 agent 需要主动发送企业微信卡片消息，可以直接通过 `message` tool 发送原始 JSON 文本，格式为 `{"msgtype":"template_card","template_card":{...}}`。当前通道会识别这个 payload 并按真正的企业微信 `template_card` 发送，不需要先搜索工作目录或查找额外模板文件。
+
 当前仍未接通的是第二层结构化卡片能力：
 
 - agent 或 tool 显式产出完整卡片 payload。

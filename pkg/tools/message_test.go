@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +94,33 @@ func TestMessageTool_Execute_WithCustomChannel(t *testing.T) {
 	}
 	if result.ForLLM != "Message sent to custom-channel:custom-chat-id" {
 		t.Errorf("Expected ForLLM 'Message sent to custom-channel:custom-chat-id', got '%s'", result.ForLLM)
+	}
+}
+
+func TestMessageTool_Execute_SeparateMessageClearsReplyTo(t *testing.T) {
+	tool := NewMessageTool()
+
+	var sentReplyTo string
+	tool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
+		sentReplyTo = ToolReplyTo(ctx)
+		return nil
+	})
+
+	ctx := WithToolRoutingContext(context.Background(), "wecom_official", "YangXu", "callback-1")
+	args := map[string]any{
+		"content":          "independent",
+		"separate_message": true,
+	}
+
+	result := tool.Execute(ctx, args)
+	if !result.Silent {
+		t.Fatal("expected silent result")
+	}
+	if sentReplyTo != "" {
+		t.Fatalf("expected empty replyTo for separate message, got %q", sentReplyTo)
+	}
+	if tool.HasSentInRound() {
+		t.Fatal("separate_message should not mark the round as already replied")
 	}
 }
 
@@ -205,6 +233,9 @@ func TestMessageTool_Description(t *testing.T) {
 	desc := tool.Description()
 	if desc == "" {
 		t.Error("Description should not be empty")
+	}
+	if !strings.Contains(desc, "template_card") {
+		t.Error("Description should mention template_card direct sending for wecom_official")
 	}
 }
 
