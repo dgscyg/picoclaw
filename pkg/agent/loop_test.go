@@ -185,6 +185,26 @@ func TestToolContext_Updates(t *testing.T) {
 	}
 }
 
+func TestShouldSuppressPostSendAck(t *testing.T) {
+	tests := []struct {
+		content string
+		want    bool
+	}{
+		{content: "已发送。", want: true},
+		{content: "发送成功", want: true},
+		{content: "sent", want: true},
+		{content: "Sent successfully.", want: true},
+		{content: "这里是详细解释", want: false},
+		{content: "", want: false},
+	}
+
+	for _, tt := range tests {
+		if got := shouldSuppressPostSendAck(tt.content); got != tt.want {
+			t.Fatalf("shouldSuppressPostSendAck(%q) = %v, want %v", tt.content, got, tt.want)
+		}
+	}
+}
+
 func TestAgentLoopRun_PropagatesReplyToToOutbound(t *testing.T) {
 	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
 	defer cleanup()
@@ -231,6 +251,52 @@ func TestAgentLoopRun_PropagatesReplyToToOutbound(t *testing.T) {
 	}
 	if got, want := msg.ReplyTo, "callback-req-9"; got != want {
 		t.Fatalf("ReplyTo = %q, want %q", got, want)
+	}
+}
+
+func TestAgentLoopRun_EmptyDirectAnswerUsesNeutralFallback(t *testing.T) {
+	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	defaultAgent.Provider = &simpleMockProvider{response: ""}
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- al.Run(runCtx)
+	}()
+	defer func() {
+		runCancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for agent loop to stop")
+		}
+	}()
+
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pubCancel()
+
+	err := msgBus.PublishInbound(pubCtx, bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:user-empty",
+		ChatID:   "user-empty",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	outCtx, outCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer outCancel()
+
+	msg, ok := msgBus.SubscribeOutbound(outCtx)
+	if !ok {
+		t.Fatal("expected outbound message")
+	}
+	if got, want := msg.Content, defaultResponse; got != want {
+		t.Fatalf("Content = %q, want %q", got, want)
 	}
 }
 

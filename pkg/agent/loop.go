@@ -183,6 +183,19 @@ func registerSharedTools(
 				})
 			})
 			agent.Tools.Register(messageTool)
+
+			wecomCardTool := tools.NewWecomCardTool()
+			wecomCardTool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
+				pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer pubCancel()
+				return msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
+					Channel: channel,
+					ChatID:  chatID,
+					Content: content,
+					ReplyTo: tools.ToolReplyTo(ctx),
+				})
+			})
+			agent.Tools.Register(wecomCardTool)
 		}
 
 		// Send file tool (outbound media via MediaStore 閳?store injected later by SetMediaStore)
@@ -349,11 +362,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					alreadySent := false
 					defaultAgent := al.registry.GetDefaultAgent()
 					if defaultAgent != nil {
-						if tool, ok := defaultAgent.Tools.Get("message"); ok {
-							if mt, ok := tool.(*tools.MessageTool); ok {
-								alreadySent = mt.HasSentInRound()
-							}
-						}
+						alreadySent = didAnyRoundSendTrackerSend(defaultAgent, "message", "wecom_card")
 					}
 
 					if !alreadySent {
@@ -604,11 +613,8 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	}
 
 	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
-	if tool, ok := agent.Tools.Get("message"); ok {
-		if resetter, ok := tool.(interface{ ResetSentInRound() }); ok {
-			resetter.ResetSentInRound()
-		}
-	}
+	resetRoundSendTracker(agent, "message")
+	resetRoundSendTracker(agent, "wecom_card")
 
 	// Resolve session key from route, while preserving explicit agent-scoped keys.
 	scopeKey := resolveScopeKey(route, msg.SessionKey)
@@ -663,6 +669,78 @@ func resolveScopeKey(route routing.ResolvedRoute, msgSessionKey string) string {
 		return msgSessionKey
 	}
 	return route.SessionKey
+}
+
+type roundSendTracker interface {
+	ResetSentInRound()
+	HasSentInRound() bool
+}
+
+func resetRoundSendTracker(agent *AgentInstance, toolName string) {
+	if agent == nil {
+		return
+	}
+	tool, ok := agent.Tools.Get(toolName)
+	if !ok {
+		return
+	}
+	tracker, ok := tool.(roundSendTracker)
+	if !ok {
+		return
+	}
+	tracker.ResetSentInRound()
+}
+
+func didAnyRoundSendTrackerSend(agent *AgentInstance, toolNames ...string) bool {
+	if agent == nil {
+		return false
+	}
+	for _, toolName := range toolNames {
+		tool, ok := agent.Tools.Get(toolName)
+		if !ok {
+			continue
+		}
+		tracker, ok := tool.(roundSendTracker)
+		if ok && tracker.HasSentInRound() {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldSuppressPostSendAck(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+
+	normalized := strings.ToLower(trimmed)
+	replacer := strings.NewReplacer(
+		"。", "",
+		".", "",
+		"！", "",
+		"!", "",
+		"，", "",
+		",", "",
+		":", "",
+		"：", "",
+		"`", "",
+		"*", "",
+		" ", "",
+		"\n", "",
+		"\r", "",
+		"\t", "",
+	)
+	normalized = replacer.Replace(normalized)
+
+	switch normalized {
+	case "已发送", "发送成功", "已发出", "ok", "done", "sent", "sentsuccessfully":
+		return true
+	}
+	if strings.Contains(normalized, "已发送卡片") || strings.Contains(normalized, "卡片已发送") {
+		return true
+	}
+	return false
 }
 
 func (al *AgentLoop) processSystemMessage(
@@ -777,11 +855,32 @@ func (al *AgentLoop) runAgentLoop(
 	// 3. Run LLM iteration loop
 	finalContent, iteration, err := al.runLLMIteration(ctx, agent, messages, opts)
 	if err != nil {
-		return "", err
+		if strings.Contains(err.Error(), "empty direct answer") {
+			logger.WarnCF("agent", "LLM returned empty direct answer; using fallback response",
+				map[string]any{
+					"agent_id":    agent.ID,
+					"session_key": opts.SessionKey,
+					"channel":     opts.Channel,
+					"chat_id":     opts.ChatID,
+				})
+			finalContent = opts.DefaultResponse
+			err = nil
+		} else {
+			return "", err
+		}
 	}
 
 	// If last tool had ForUser content and we already sent it, we might not need to send final response
 	// This is controlled by the tool's Silent flag and ForUser content
+	if didAnyRoundSendTrackerSend(agent, "message", "wecom_card") && shouldSuppressPostSendAck(finalContent) {
+		logger.DebugCF("agent", "Suppressing post-send acknowledgement after direct tool delivery",
+			map[string]any{
+				"agent_id":    agent.ID,
+				"session_key": opts.SessionKey,
+				"content":     finalContent,
+			})
+		return "", nil
+	}
 
 	// 4. Handle empty response
 	if finalContent == "" {
@@ -1080,6 +1179,9 @@ func (al *AgentLoop) runLLMIteration(
 					"iteration":     iteration,
 					"content_chars": len(finalContent),
 				})
+			if finalContent == "" {
+				return "", iteration, fmt.Errorf("llm returned empty direct answer")
+			}
 			break
 		}
 

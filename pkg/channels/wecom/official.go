@@ -57,6 +57,7 @@ const (
 	wecomOfficialMediaDownloadTimeout = 30 * time.Second
 	wecomOfficialReplyIdleClose       = 250 * time.Millisecond
 	wecomOfficialReplyTaskMaxAge      = 10 * time.Minute
+	wecomOfficialStreamUpdateExpiry   = 6 * time.Minute
 )
 
 var (
@@ -166,17 +167,21 @@ type wecomOfficialMediaSource struct {
 }
 
 type wecomOfficialReplyTask struct {
-	ReqID     string
-	ChatID    string
-	StreamID  string
-	CreatedAt time.Time
+	ReqID        string
+	ChatID       string
+	StreamID     string
+	CreatedAt    time.Time
+	EditDeadline time.Time
 
-	accumulated string
-	cardSent    bool
-	mu          sync.Mutex
-	timer       *time.Timer
-	sequence    uint64
-	finalized   bool
+	accumulated          string
+	cardSent             bool
+	closedNaturally      bool
+	finalDeliveryPending bool
+	pendingFinal         string
+	mu                   sync.Mutex
+	timer                *time.Timer
+	sequence             uint64
+	finalized            bool
 }
 
 func (c *WeComOfficialChannel) placeholderEnabled() bool {
@@ -204,6 +209,14 @@ func (c *WeComOfficialChannel) cardTitle() string {
 		return wecomOfficialDefaultCardTitle
 	}
 	return title
+}
+
+func (c *WeComOfficialChannel) streamCloseBeforeExpiry() time.Duration {
+	return 30 * time.Second
+}
+
+func (c *WeComOfficialChannel) streamClosingText() string {
+	return "I am still working on this. I will send the full result in a new message shortly."
 }
 
 // WeComOfficialChannel implements the official WeCom Smart Bot websocket channel.
@@ -296,8 +309,19 @@ func (c *WeComOfficialChannel) Send(ctx context.Context, msg bus.OutboundMessage
 	if strings.TrimSpace(msg.ChatID) == "" {
 		return fmt.Errorf("wecom_official send: empty chat id: %w", channels.ErrSendFailed)
 	}
-
-	if task := c.activeReplyTask(msg.ChatID, msg.ReplyTo); task != nil {
+	task := c.activeReplyTask(msg.ChatID, msg.ReplyTo)
+	if payload, ok := parseWeComOfficialTemplateCardPayload(msg.Content); ok {
+		if task != nil {
+			return c.sendReplyTemplateCard(ctx, task, payload)
+		}
+		_, err := c.sendCommandAndWait(ctx, wecomOfficialCmdSendMessage, map[string]any{
+			"chatid":        msg.ChatID,
+			"msgtype":       "template_card",
+			"template_card": payload,
+		}, wecomOfficialSendTimeout)
+		return err
+	}
+	if task != nil {
 		if err := c.sendReplyChunk(ctx, task, msg.Content); err != nil {
 			return err
 		}
@@ -309,6 +333,26 @@ func (c *WeComOfficialChannel) Send(ctx context.Context, msg bus.OutboundMessage
 	}
 
 	return c.sendMarkdownMessage(ctx, msg.ChatID, msg.Content)
+}
+
+func parseWeComOfficialTemplateCardPayload(content string) (map[string]any, bool) {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+		return nil, false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return nil, false
+	}
+	msgType, _ := payload["msgtype"].(string)
+	if msgType != "template_card" {
+		return nil, false
+	}
+	templateCard, ok := payload["template_card"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	return templateCard, true
 }
 
 func (c *WeComOfficialChannel) connectionLoop() {
@@ -529,6 +573,7 @@ func (c *WeComOfficialChannel) processIncomingMessage(frame wecomOfficialFrame, 
 	if chatID == "" {
 		chatID = userID
 	}
+	isGroupChat := msg.ChatType == "group"
 
 	sender := bus.SenderInfo{
 		Platform:    "wecom_official",
@@ -539,14 +584,13 @@ func (c *WeComOfficialChannel) processIncomingMessage(frame wecomOfficialFrame, 
 	if !c.IsAllowedSender(sender) {
 		return
 	}
-
 	if msg.MsgType == "event" {
 		c.handleEventMessage(frame, chatID, msg)
 		return
 	}
 
 	content, mediaSources, quoteContent := parseWeComOfficialMessage(msg)
-	if msg.ChatType == "group" {
+	if isGroupChat {
 		content = strings.TrimSpace(wecomOfficialAtPattern.ReplaceAllString(content, ""))
 	}
 	if content == "" && quoteContent != "" {
@@ -560,7 +604,7 @@ func (c *WeComOfficialChannel) processIncomingMessage(frame wecomOfficialFrame, 
 	}
 
 	peer := bus.Peer{Kind: "direct", ID: chatID}
-	if msg.ChatType == "group" {
+	if isGroupChat {
 		peer = bus.Peer{Kind: "group", ID: chatID}
 		respond, cleaned := c.ShouldRespondInGroup(false, content)
 		if !respond {
@@ -983,6 +1027,11 @@ func buildWeComOfficialTemplateCard(title, content string) map[string]any {
 		"main_title": map[string]string{
 			"title": strings.TrimSpace(title),
 		},
+		// text_notice cards require a valid card_action in current WeCom validation.
+		"card_action": map[string]any{
+			"type": 1,
+			"url":  "https://work.weixin.qq.com/",
+		},
 	}
 	if plain == "" {
 		return card
@@ -1049,6 +1098,30 @@ func (c *WeComOfficialChannel) sendReplyChunk(
 		c.removeReplyTask(task)
 		return nil
 	}
+	if task.closedNaturally {
+		task.pendingFinal += content
+		task.finalDeliveryPending = true
+		task.mu.Unlock()
+		return nil
+	}
+	if time.Until(task.EditDeadline) <= c.streamCloseBeforeExpiry() {
+		closingText := c.streamClosingText()
+		if task.accumulated == "" || !strings.Contains(task.accumulated, closingText) {
+			if err := c.sendReplyStream(ctx, task.ReqID, task.StreamID, strings.TrimSpace(task.accumulated+"\n\n"+closingText), true); err != nil {
+				task.mu.Unlock()
+				return err
+			}
+		}
+		task.closedNaturally = true
+		task.finalized = true
+		task.pendingFinal = content
+		task.finalDeliveryPending = true
+		task.timer = nil
+		task.mu.Unlock()
+		c.removeReplyTask(task)
+		go c.deliverDeferredFinal(task)
+		return nil
+	}
 	if task.timer != nil {
 		task.timer.Stop()
 		task.timer = nil
@@ -1077,6 +1150,33 @@ func (c *WeComOfficialChannel) sendReplyChunk(
 	})
 	task.mu.Unlock()
 	return nil
+}
+
+func (c *WeComOfficialChannel) deliverDeferredFinal(task *wecomOfficialReplyTask) {
+	if task == nil {
+		return
+	}
+	task.mu.Lock()
+	content := strings.TrimSpace(task.pendingFinal)
+	task.pendingFinal = ""
+	task.finalDeliveryPending = false
+	chatID := task.ChatID
+	task.mu.Unlock()
+	if content == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), wecomOfficialSendTimeout)
+	defer cancel()
+	sendFinal := c.sendMarkdownMessage
+	if c.cardEnabled() {
+		sendFinal = c.sendTemplateCardMessage
+	}
+	if err := sendFinal(ctx, chatID, content); err != nil {
+		logger.WarnCF("wecom_official", "Failed to deliver deferred final response", map[string]any{
+			"chat_id": chatID,
+			"error":   err.Error(),
+		})
+	}
 }
 
 func (c *WeComOfficialChannel) maybeSendThinkingPlaceholder(task *wecomOfficialReplyTask) {
@@ -1137,6 +1237,50 @@ func (c *WeComOfficialChannel) sendReplyStreamWithCard(
 	}
 
 	_, err := c.sendCommandWithReqIDAndWait(ctx, reqID, wecomOfficialCmdRespondMessage, body, wecomOfficialSendTimeout)
+	return err
+}
+
+func (c *WeComOfficialChannel) sendReplyTemplateCard(
+	ctx context.Context,
+	task *wecomOfficialReplyTask,
+	templateCard map[string]any,
+) error {
+	if task == nil {
+		return nil
+	}
+
+	task.mu.Lock()
+	if task.finalized {
+		task.mu.Unlock()
+		c.removeReplyTask(task)
+		return nil
+	}
+	if task.timer != nil {
+		task.timer.Stop()
+		task.timer = nil
+	}
+	task.sequence++
+	if err := c.sendReplyTemplateCardPayload(ctx, task.ReqID, templateCard); err != nil {
+		task.mu.Unlock()
+		return err
+	}
+	task.cardSent = true
+	task.finalized = true
+	task.mu.Unlock()
+
+	c.removeReplyTask(task)
+	return nil
+}
+
+func (c *WeComOfficialChannel) sendReplyTemplateCardPayload(
+	ctx context.Context,
+	reqID string,
+	templateCard map[string]any,
+) error {
+	_, err := c.sendCommandWithReqIDAndWait(ctx, reqID, wecomOfficialCmdRespondMessage, map[string]any{
+		"msgtype":       "template_card",
+		"template_card": templateCard,
+	}, wecomOfficialSendTimeout)
 	return err
 }
 
@@ -1244,10 +1388,11 @@ func (c *WeComOfficialChannel) enqueueReplyTask(chatID, reqID string) *wecomOffi
 
 	c.compactReplyTasksLocked(chatID)
 	task := &wecomOfficialReplyTask{
-		ReqID:     reqID,
-		ChatID:    chatID,
-		StreamID:  generateWeComOfficialReqID("stream"),
-		CreatedAt: time.Now(),
+		ReqID:        reqID,
+		ChatID:       chatID,
+		StreamID:     generateWeComOfficialReqID("stream"),
+		CreatedAt:    time.Now(),
+		EditDeadline: time.Now().Add(wecomOfficialStreamUpdateExpiry),
 	}
 	c.replyTasks[chatID] = append(c.replyTasks[chatID], task)
 	return task

@@ -10,7 +10,7 @@ type SendCallback func(ctx context.Context, channel, chatID, content string) err
 
 type MessageTool struct {
 	sendCallback SendCallback
-	sentInRound  atomic.Bool // Tracks whether a message was sent in the current processing round
+	sentInRound  atomic.Bool // Tracks whether a reply-context message was sent in the current processing round
 }
 
 func NewMessageTool() *MessageTool {
@@ -22,7 +22,7 @@ func (t *MessageTool) Name() string {
 }
 
 func (t *MessageTool) Description() string {
-	return "Send a message to user on a chat channel. Use this when you want to communicate something."
+	return "Send a plain message to the user on a chat channel. Use this when you want to communicate something. For `wecom_official`, you may send an independent proactive ordinary message by setting `separate_message=true`. For enterprise WeCom template card messages, use the dedicated `wecom_card` tool instead of hand-writing raw `template_card` JSON here."
 }
 
 func (t *MessageTool) Parameters() map[string]any {
@@ -31,7 +31,7 @@ func (t *MessageTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"content": map[string]any{
 				"type":        "string",
-				"description": "The message content to send",
+				"description": "The plain text or markdown message content to send. For enterprise WeCom template cards, use the `wecom_card` tool instead.",
 			},
 			"channel": map[string]any{
 				"type":        "string",
@@ -40,6 +40,10 @@ func (t *MessageTool) Parameters() map[string]any {
 			"chat_id": map[string]any{
 				"type":        "string",
 				"description": "Optional: target chat/user ID",
+			},
+			"separate_message": map[string]any{
+				"type":        "boolean",
+				"description": "Optional: when true, send as an independent message instead of reusing the current reply context.",
 			},
 		},
 		"required": []string{"content"},
@@ -81,6 +85,11 @@ func (t *MessageTool) Execute(ctx context.Context, args map[string]any) *ToolRes
 		return &ToolResult{ForLLM: "No target channel/chat specified", IsError: true}
 	}
 
+	separateMessage, _ := args["separate_message"].(bool)
+	if separateMessage {
+		ctx = WithToolRoutingContext(ctx, channel, chatID, "")
+	}
+
 	if t.sendCallback == nil {
 		return &ToolResult{ForLLM: "Message sending not configured", IsError: true}
 	}
@@ -93,7 +102,9 @@ func (t *MessageTool) Execute(ctx context.Context, args map[string]any) *ToolRes
 		}
 	}
 
-	t.sentInRound.Store(true)
+	if !separateMessage {
+		t.sentInRound.Store(true)
+	}
 	// Silent: user already received the message directly
 	return &ToolResult{
 		ForLLM: fmt.Sprintf("Message sent to %s:%s", channel, chatID),
