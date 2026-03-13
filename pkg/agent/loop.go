@@ -58,6 +58,7 @@ type processOptions struct {
 	ReplyTo              string   // Optional channel-specific reply correlation token
 	SuppressPostCardText bool     // If true, suppress final assistant text after direct card delivery
 	UserMessage          string   // User message content (may include prefix)
+	HistoryUserMessage   string   // Optional sanitized user message persisted to session history
 	Media                []string // media:// refs from inbound message
 	DefaultResponse      string   // Response when LLM returns empty
 	EnableSummary        bool     // Whether to trigger summarization
@@ -130,6 +131,7 @@ func (al *AgentLoop) sendToolMessage(
 	ctx context.Context,
 	channel, chatID, content string,
 ) error {
+	replyTo := al.normalizeReplyToForOutbound(channel, chatID, tools.ToolReplyTo(ctx))
 	if channel == "wecom_official" && al.channelManager != nil {
 		if ch, ok := al.channelManager.GetChannel(channel); ok {
 			sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -138,7 +140,7 @@ func (al *AgentLoop) sendToolMessage(
 				Channel: channel,
 				ChatID:  chatID,
 				Content: content,
-				ReplyTo: tools.ToolReplyTo(ctx),
+				ReplyTo: replyTo,
 			})
 		}
 	}
@@ -149,8 +151,29 @@ func (al *AgentLoop) sendToolMessage(
 		Channel: channel,
 		ChatID:  chatID,
 		Content: content,
-		ReplyTo: tools.ToolReplyTo(ctx),
+		ReplyTo: replyTo,
 	})
+}
+
+func (al *AgentLoop) normalizeReplyToForOutbound(channel, chatID, replyTo string) string {
+	replyTo = strings.TrimSpace(replyTo)
+	if replyTo == "" || channel == "" || chatID == "" || al.channelManager == nil {
+		return replyTo
+	}
+	ch, ok := al.channelManager.GetChannel(channel)
+	if !ok || ch == nil {
+		return replyTo
+	}
+	type replyReuseInspector interface {
+		CanReuseReply(chatID, replyTo string) bool
+	}
+	if inspector, ok := ch.(replyReuseInspector); ok {
+		if inspector.CanReuseReply(chatID, replyTo) {
+			return replyTo
+		}
+		return ""
+	}
+	return replyTo
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
@@ -425,7 +448,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 							Channel: msg.Channel,
 							ChatID:  msg.ChatID,
 							Content: response,
-							ReplyTo: inboundMetadata(msg, "reply_to"),
+							ReplyTo: al.normalizeReplyToForOutbound(msg.Channel, msg.ChatID, inboundMetadata(msg, "reply_to")),
 						})
 						logger.InfoCF("agent", "Published outbound response",
 							map[string]any{
@@ -692,11 +715,48 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		ReplyTo:              inboundMetadata(msg, "reply_to"),
 		SuppressPostCardText: inboundMetadata(msg, "event_type") == "template_card_event",
 		UserMessage:          msg.Content,
+		HistoryUserMessage:   historyUserMessageForInbound(msg),
 		Media:                msg.Media,
 		DefaultResponse:      defaultResponse,
 		EnableSummary:        true,
 		SendResponse:         false,
 	})
+}
+
+func historyUserMessageForInbound(msg bus.InboundMessage) string {
+	if inboundMetadata(msg, "event_type") != "template_card_event" {
+		return msg.Content
+	}
+	actionText := strings.TrimSpace(inboundMetadata(msg, "event_action_text"))
+	if actionText != "" {
+		return fmt.Sprintf("User clicked template card action: %s.", actionText)
+	}
+	eventKey := strings.TrimSpace(inboundMetadata(msg, "event_key"))
+	if eventKey != "" {
+		return fmt.Sprintf("User clicked template card action key: %s.", eventKey)
+	}
+	return "User clicked a template card action."
+}
+
+func toolCallRequiresSequentialExecution(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "message", "wecom_card", "send_file":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldExecuteToolCallsSequentially(calls []providers.ToolCall) bool {
+	if len(calls) <= 1 {
+		return false
+	}
+	for _, tc := range calls {
+		if toolCallRequiresSequentialExecution(tc.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.ResolvedRoute, *AgentInstance, error) {
@@ -910,7 +970,15 @@ func (al *AgentLoop) runAgentLoop(
 	messages = resolveMediaRefs(messages, al.mediaStore, maxMediaSize)
 
 	// 2. Save user message to session
-	agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
+	if !opts.NoHistory {
+		historyUserMessage := opts.HistoryUserMessage
+		if historyUserMessage == "" {
+			historyUserMessage = opts.UserMessage
+		}
+		if strings.TrimSpace(historyUserMessage) != "" {
+			agent.Sessions.AddMessage(opts.SessionKey, "user", historyUserMessage)
+		}
+	}
 
 	// 3. Run LLM iteration loop
 	finalContent, iteration, err := al.runLLMIteration(ctx, agent, messages, opts)
@@ -932,6 +1000,15 @@ func (al *AgentLoop) runAgentLoop(
 
 	// If last tool had ForUser content and we already sent it, we might not need to send final response
 	// This is controlled by the tool's Silent flag and ForUser content
+	if opts.SuppressPostCardText && didAnyRoundSendTrackerSend(agent, "message") {
+		logger.DebugCF("agent", "Suppressing final assistant text after template-card event follow-up message",
+			map[string]any{
+				"agent_id":    agent.ID,
+				"session_key": opts.SessionKey,
+				"content":     finalContent,
+			})
+		return "", nil
+	}
 	if opts.SuppressPostCardText && didAnyRoundSendTrackerSend(agent, "wecom_card") && shouldSuppressPostCardResponse(finalContent) {
 		logger.DebugCF("agent", "Suppressing post-card assistant text after direct tool delivery",
 			map[string]any{
@@ -971,7 +1048,7 @@ func (al *AgentLoop) runAgentLoop(
 			Channel: opts.Channel,
 			ChatID:  opts.ChatID,
 			Content: finalContent,
-			ReplyTo: opts.ReplyTo,
+			ReplyTo: al.normalizeReplyToForOutbound(opts.Channel, opts.ChatID, opts.ReplyTo),
 		})
 	}
 
@@ -1193,7 +1270,7 @@ func (al *AgentLoop) runLLMIteration(
 						Channel: opts.Channel,
 						ChatID:  opts.ChatID,
 						Content: "Context window exceeded. Compressing history and retrying...",
-						ReplyTo: opts.ReplyTo,
+						ReplyTo: al.normalizeReplyToForOutbound(opts.Channel, opts.ChatID, opts.ReplyTo),
 					})
 				}
 
@@ -1312,81 +1389,88 @@ func (al *AgentLoop) runLLMIteration(
 		}
 
 		agentResults := make([]indexedAgentResult, len(normalizedToolCalls))
-		var wg sync.WaitGroup
+		executeToolCall := func(idx int, tc providers.ToolCall) {
+			agentResults[idx].tc = tc
 
-		for i, tc := range normalizedToolCalls {
-			agentResults[i].tc = tc
+			argsJSON, _ := json.Marshal(tc.Arguments)
+			argsPreview := utils.Truncate(string(argsJSON), 200)
+			logger.InfoCF("agent", fmt.Sprintf("Tool call: %s(%s)", tc.Name, argsPreview),
+				map[string]any{
+					"agent_id":  agent.ID,
+					"tool":      tc.Name,
+					"iteration": iteration,
+				})
 
-			wg.Add(1)
-			go func(idx int, tc providers.ToolCall) {
-				defer wg.Done()
-
-				argsJSON, _ := json.Marshal(tc.Arguments)
-				argsPreview := utils.Truncate(string(argsJSON), 200)
-				logger.InfoCF("agent", fmt.Sprintf("Tool call: %s(%s)", tc.Name, argsPreview),
-					map[string]any{
-						"agent_id":  agent.ID,
-						"tool":      tc.Name,
-						"iteration": iteration,
-					})
-
-				// Create async callback for tools that implement AsyncExecutor.
-				// When the background work completes, this publishes the result
-				// as an inbound system message so processSystemMessage routes it
-				// back to the user via the normal agent loop.
-				asyncCallback := func(_ context.Context, result *tools.ToolResult) {
-					// Send ForUser content directly to the user (immediate feedback),
-					// mirroring the synchronous tool execution path.
-					if !result.Silent && result.ForUser != "" {
-						outCtx, outCancel := context.WithTimeout(context.Background(), 5*time.Second)
-						defer outCancel()
-						_ = al.bus.PublishOutbound(outCtx, bus.OutboundMessage{
-							Channel: opts.Channel,
-							ChatID:  opts.ChatID,
-							Content: result.ForUser,
-							ReplyTo: opts.ReplyTo,
-						})
-					}
-
-					// Determine content for the agent loop (ForLLM or error).
-					content := result.ForLLM
-					if content == "" && result.Err != nil {
-						content = result.Err.Error()
-					}
-					if content == "" {
-						return
-					}
-
-					logger.InfoCF("agent", "Async tool completed, publishing result",
-						map[string]any{
-							"tool":        tc.Name,
-							"content_len": len(content),
-							"channel":     opts.Channel,
-						})
-
-					pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer pubCancel()
-					_ = al.bus.PublishInbound(pubCtx, bus.InboundMessage{
-						Channel:  "system",
-						SenderID: fmt.Sprintf("async:%s", tc.Name),
-						ChatID:   fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
-						Content:  content,
+			// Create async callback for tools that implement AsyncExecutor.
+			// When the background work completes, this publishes the result
+			// as an inbound system message so processSystemMessage routes it
+			// back to the user via the normal agent loop.
+			asyncCallback := func(_ context.Context, result *tools.ToolResult) {
+				// Send ForUser content directly to the user (immediate feedback),
+				// mirroring the synchronous tool execution path.
+				if !result.Silent && result.ForUser != "" {
+					outCtx, outCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer outCancel()
+					_ = al.bus.PublishOutbound(outCtx, bus.OutboundMessage{
+						Channel: opts.Channel,
+						ChatID:  opts.ChatID,
+						Content: result.ForUser,
+						ReplyTo: al.normalizeReplyToForOutbound(opts.Channel, opts.ChatID, opts.ReplyTo),
 					})
 				}
 
-				toolResult := agent.Tools.ExecuteWithContext(
-					ctx,
-					tc.Name,
-					tc.Arguments,
-					opts.Channel,
-					opts.ChatID,
-					opts.ReplyTo,
-					asyncCallback,
-				)
-				agentResults[idx].result = toolResult
-			}(i, tc)
+				// Determine content for the agent loop (ForLLM or error).
+				content := result.ForLLM
+				if content == "" && result.Err != nil {
+					content = result.Err.Error()
+				}
+				if content == "" {
+					return
+				}
+
+				logger.InfoCF("agent", "Async tool completed, publishing result",
+					map[string]any{
+						"tool":        tc.Name,
+						"content_len": len(content),
+						"channel":     opts.Channel,
+					})
+
+				pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer pubCancel()
+				_ = al.bus.PublishInbound(pubCtx, bus.InboundMessage{
+					Channel:  "system",
+					SenderID: fmt.Sprintf("async:%s", tc.Name),
+					ChatID:   fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
+					Content:  content,
+				})
+			}
+
+			agentResults[idx].result = agent.Tools.ExecuteWithContext(
+				ctx,
+				tc.Name,
+				tc.Arguments,
+				opts.Channel,
+				opts.ChatID,
+				opts.ReplyTo,
+				asyncCallback,
+			)
 		}
-		wg.Wait()
+
+		if shouldExecuteToolCallsSequentially(normalizedToolCalls) {
+			for i, tc := range normalizedToolCalls {
+				executeToolCall(i, tc)
+			}
+		} else {
+			var wg sync.WaitGroup
+			for i, tc := range normalizedToolCalls {
+				wg.Add(1)
+				go func(idx int, tc providers.ToolCall) {
+					defer wg.Done()
+					executeToolCall(idx, tc)
+				}(i, tc)
+			}
+			wg.Wait()
+		}
 
 		// Process results in original order (send to user, save to session)
 		for _, r := range agentResults {
@@ -1396,7 +1480,7 @@ func (al *AgentLoop) runLLMIteration(
 					Channel: opts.Channel,
 					ChatID:  opts.ChatID,
 					Content: r.result.ForUser,
-					ReplyTo: opts.ReplyTo,
+					ReplyTo: al.normalizeReplyToForOutbound(opts.Channel, opts.ChatID, opts.ReplyTo),
 				})
 				logger.DebugCF("agent", "Sent tool result to user",
 					map[string]any{

@@ -374,6 +374,15 @@ func sanitizeHistoryForProvider(history []providers.Message) []providers.Message
 	}
 	sanitized := make([]providers.Message, 0, len(history))
 	for _, msg := range history {
+		if msg.Role == "user" {
+			if normalized, ok := normalizeTemplateCardEventHistory(msg.Content); ok {
+				msg.Content = normalized
+			}
+			if strings.TrimSpace(msg.Content) == "" {
+				logger.DebugCF("agent", "Dropping empty user message from history after template-card-event normalization", map[string]any{})
+				continue
+			}
+		}
 		switch msg.Role {
 		case "system":
 			logger.DebugCF("agent", "Dropping system message from history", map[string]any{})
@@ -449,6 +458,51 @@ func sanitizeHistoryForProvider(history []providers.Message) []providers.Message
 		final = append(final, msg)
 	}
 	return final
+}
+
+func normalizeTemplateCardEventHistory(content string) (string, bool) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return "", false
+	}
+
+	if idx := strings.Index(content, `Equivalent user instruction: "`); idx >= 0 {
+		rest := content[idx+len(`Equivalent user instruction: "`):]
+		if end := strings.Index(rest, `".`); end >= 0 {
+			action := strings.TrimSpace(rest[:end])
+			if action != "" {
+				return fmt.Sprintf("User clicked template card action: %s.", action), true
+			}
+		}
+	}
+
+	if strings.HasPrefix(content, "User clicked template card action: ") {
+		line := content
+		if end := strings.Index(line, "\n"); end >= 0 {
+			line = line[:end]
+		}
+		if end := strings.Index(line, " Equivalent user instruction:"); end >= 0 {
+			line = line[:end]
+		}
+		return strings.TrimSpace(line), true
+	}
+
+	if strings.HasPrefix(content, "Template card event triggered.") {
+		if eventKeyIdx := strings.Index(content, "event_key="); eventKeyIdx >= 0 {
+			rest := content[eventKeyIdx+len("event_key="):]
+			end := strings.Index(rest, ".")
+			if end >= 0 {
+				rest = rest[:end]
+			}
+			eventKey := strings.TrimSpace(rest)
+			if eventKey != "" {
+				return fmt.Sprintf("User clicked template card action key: %s.", eventKey), true
+			}
+		}
+		return "", true
+	}
+
+	return content, false
 }
 
 func (cb *ContextBuilder) AddToolResult(messages []providers.Message, toolCallID, toolName, result string) []providers.Message {

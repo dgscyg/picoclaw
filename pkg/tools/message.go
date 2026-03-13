@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 )
 
@@ -22,7 +23,7 @@ func (t *MessageTool) Name() string {
 }
 
 func (t *MessageTool) Description() string {
-	return "Send a plain message to the user on a chat channel. Use this when you want to communicate something. For `wecom_official`, you may send an independent proactive ordinary message by setting `separate_message=true`; that path sends an ordinary markdown message, not a template card. For enterprise WeCom template card messages or template-card updates, use the dedicated `wecom_card` tool instead of hand-writing raw `template_card` JSON here."
+	return "Send a plain message to the user on a chat channel. Use this when you want to communicate something. For `wecom_official`, the normal in-context path can automatically switch from reply-stream editing to the official callback `response_url` when the 6-minute stream edit window has expired, so keep the current reply context unless you truly want a separate proactive message. Use `separate_message=true` only when you intentionally want an independent proactive ordinary message; that path sends an ordinary markdown message, not a template card, and does not reuse the current callback response_url. If the original thinking placeholder or reply stream is already stale, do not try to edit it manually; just send the normal message in the current reply context and let the channel deliver a new follow-up message. For enterprise WeCom template card messages or template-card updates, use the dedicated `wecom_card` tool instead of hand-writing raw `template_card` JSON here."
 }
 
 func (t *MessageTool) Parameters() map[string]any {
@@ -43,7 +44,7 @@ func (t *MessageTool) Parameters() map[string]any {
 			},
 			"separate_message": map[string]any{
 				"type":        "boolean",
-				"description": "Optional: when true, send as an independent message instead of reusing the current reply context.",
+				"description": "Optional: when true, send as an independent message instead of reusing the current reply context. For `wecom_official`, do not set this just because the original reply stream is old; keeping the current reply context lets the channel fall back to the official callback response_url. Use `separate_message=true` only when you explicitly want a brand-new proactive message unrelated to the current callback reply chain.",
 			},
 		},
 		"required": []string{"content"},
@@ -86,6 +87,15 @@ func (t *MessageTool) Execute(ctx context.Context, args map[string]any) *ToolRes
 	}
 
 	separateMessage, _ := args["separate_message"].(bool)
+	if !separateMessage &&
+		channel == "wecom_official" &&
+		strings.TrimSpace(ToolReplyTo(ctx)) != "" &&
+		t.sentInRound.Load() {
+		// The first in-round send may legitimately replace the callback placeholder,
+		// but additional sends in the same round must break out as independent
+		// messages instead of repeatedly editing the same WeCom reply stream.
+		separateMessage = true
+	}
 	if separateMessage {
 		ctx = WithToolRoutingContext(ctx, channel, chatID, "")
 	}

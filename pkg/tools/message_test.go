@@ -124,6 +124,36 @@ func TestMessageTool_Execute_SeparateMessageClearsReplyTo(t *testing.T) {
 	}
 }
 
+func TestMessageTool_Execute_WeComOfficialSecondSendClearsReplyTo(t *testing.T) {
+	tool := NewMessageTool()
+
+	replyTos := make([]string, 0, 2)
+	tool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
+		replyTos = append(replyTos, ToolReplyTo(ctx))
+		return nil
+	})
+
+	ctx := WithToolRoutingContext(context.Background(), "wecom_official", "YangXu", "callback-1")
+	first := tool.Execute(ctx, map[string]any{"content": "3"})
+	if first.IsError {
+		t.Fatalf("first execute error: %v", first.ForLLM)
+	}
+	second := tool.Execute(ctx, map[string]any{"content": "2"})
+	if second.IsError {
+		t.Fatalf("second execute error: %v", second.ForLLM)
+	}
+
+	if len(replyTos) != 2 {
+		t.Fatalf("expected 2 sends, got %d", len(replyTos))
+	}
+	if got, want := replyTos[0], "callback-1"; got != want {
+		t.Fatalf("first replyTo = %q, want %q", got, want)
+	}
+	if got := replyTos[1]; got != "" {
+		t.Fatalf("second replyTo = %q, want empty", got)
+	}
+}
+
 func TestMessageTool_Execute_SendFailure(t *testing.T) {
 	tool := NewMessageTool()
 
