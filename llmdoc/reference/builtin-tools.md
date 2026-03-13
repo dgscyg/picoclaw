@@ -69,7 +69,14 @@ PicoClaw includes 15+ built-in tools covering filesystem operations, shell execu
 - **Source:** `pkg/tools/message.go:11-103`
 - **Parameters:** `content` (string), `channel` (optional), `chat_id` (optional)
 - **Returns:** Silent result (message sent directly to user)
-- **Context:** Uses `ToolChannel/ToolChatID` from context for routing
+- **Context:** Uses `ToolChannel/ToolChatID` from context for routing; on `wecom_official`, `separate_message=true` sends proactive markdown, not template cards
+
+### wecom_card
+- **Source:** `pkg/tools/wecom_card.go`
+- **Parameters:** Structured enterprise WeCom `template_card` payload fields, including `card_type`, `main_title`, `card_action`, interaction lists, and optional `send`
+- **Returns:** Silent result when the card is sent directly to `wecom_official`
+- **Context:** Uses `ToolChannel/ToolChatID/ToolReplyTo` from context so callback-scoped sends become official `template_card` replies or `aibot_respond_update_msg` card updates
+- **Defaults:** Applies `channels.wecom_official.card.title` as the default branding title when the generated card still contains placeholder `PicoClaw` branding or empty `source.desc`
 
 ### send_file
 - **Source:** `pkg/tools/send_file.go`

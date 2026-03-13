@@ -101,6 +101,71 @@ func TestBuildWecomCardPayload_ButtonInteractionAllowsCardActionTypeZero(t *test
 	}
 }
 
+func TestBuildWecomCardPayload_ButtonInteractionAutoGeneratesTaskID(t *testing.T) {
+	payload, result := buildWecomCardPayload(map[string]any{
+		"card_type": "button_interaction",
+		"main_title": map[string]any{
+			"title": "按钮卡片",
+		},
+		"button_list": []any{
+			map[string]any{
+				"text": "确认",
+				"key":  "confirm",
+			},
+		},
+		"card_action": map[string]any{
+			"type": 0,
+		},
+	})
+	if result != nil {
+		t.Fatalf("buildWecomCardPayload() error = %+v", result)
+	}
+
+	templateCard := payload["template_card"].(map[string]any)
+	taskID, _ := templateCard["task_id"].(string)
+	if taskID == "" {
+		t.Fatal("expected auto-generated task_id")
+	}
+}
+
+func TestBuildWecomCardPayload_AppliesDefaultTitleBranding(t *testing.T) {
+	payload, result := buildWecomCardPayloadWithDefaults(map[string]any{
+		"card_type": "button_interaction",
+		"source": map[string]any{
+			"desc": "",
+		},
+		"main_title": map[string]any{
+			"title": "PicoClaw 卡片消息",
+			"desc":  "PicoClaw 测试卡片",
+		},
+		"button_list": []any{
+			map[string]any{
+				"text": "确认",
+				"key":  "confirm",
+			},
+		},
+		"card_action": map[string]any{
+			"type": 0,
+		},
+	}, "Armand")
+	if result != nil {
+		t.Fatalf("buildWecomCardPayloadWithDefaults() error = %+v", result)
+	}
+
+	templateCard := payload["template_card"].(map[string]any)
+	source := templateCard["source"].(map[string]any)
+	if got, want := source["desc"], "Armand"; got != want {
+		t.Fatalf("source.desc = %v, want %v", got, want)
+	}
+	mainTitle := templateCard["main_title"].(map[string]any)
+	if got, want := mainTitle["title"], "Armand 卡片消息"; got != want {
+		t.Fatalf("main_title.title = %v, want %v", got, want)
+	}
+	if got, want := mainTitle["desc"], "Armand 测试卡片"; got != want {
+		t.Fatalf("main_title.desc = %v, want %v", got, want)
+	}
+}
+
 func TestBuildWecomCardPayload_VoteInteraction(t *testing.T) {
 	payload, result := buildWecomCardPayload(map[string]any{
 		"card_type": "vote_interaction",
@@ -230,6 +295,52 @@ func TestBuildWecomCardPayload_IgnoresEmptyOptionalSections(t *testing.T) {
 	}
 	if _, exists := templateCard["button_list"]; exists {
 		t.Fatalf("button_list should be omitted when empty: %#v", templateCard)
+	}
+}
+
+func TestBuildWecomCardPayload_ButtonInteractionIgnoresUnusedImageScaffolding(t *testing.T) {
+	payload, result := buildWecomCardPayload(map[string]any{
+		"card_type": "button_interaction",
+		"main_title": map[string]any{
+			"title": "图片卡片",
+		},
+		"task_id": "task_button_image_1",
+		"button_list": []any{
+			map[string]any{
+				"text": "确认",
+				"key":  "confirm",
+			},
+		},
+		"card_action": map[string]any{
+			"type": 0,
+		},
+		"image_text_area": map[string]any{
+			"image_url": "",
+			"title":     "",
+		},
+		"card_image": map[string]any{
+			"url":          "",
+			"aspect_ratio": 1.5,
+		},
+		"vertical_content_list": []any{
+			map[string]any{
+				"title": "状态",
+				"desc":  "已发送",
+			},
+		},
+	})
+	if result != nil {
+		t.Fatalf("buildWecomCardPayload() error = %+v", result)
+	}
+	templateCard := payload["template_card"].(map[string]any)
+	if _, exists := templateCard["image_text_area"]; exists {
+		t.Fatalf("image_text_area should be omitted: %#v", templateCard)
+	}
+	if _, exists := templateCard["card_image"]; exists {
+		t.Fatalf("card_image should be omitted: %#v", templateCard)
+	}
+	if _, exists := templateCard["vertical_content_list"]; exists {
+		t.Fatalf("vertical_content_list should be omitted: %#v", templateCard)
 	}
 }
 

@@ -117,7 +117,7 @@ func (s *wecomOfficialTestServer) handleConn(conn *websocket.Conn) {
 			})
 		case wecomOfficialCmdHeartbeat:
 			s.writeAck(conn, frame.Headers.ReqID)
-		case wecomOfficialCmdRespondMessage, wecomOfficialCmdRespondWelcome:
+		case wecomOfficialCmdRespondMessage, wecomOfficialCmdRespondUpdate, wecomOfficialCmdRespondWelcome:
 			s.replyCh <- frame
 			s.writeAck(conn, frame.Headers.ReqID)
 		case wecomOfficialCmdSendMessage:
@@ -262,7 +262,7 @@ func TestWeComOfficialSend(t *testing.T) {
 	}
 }
 
-func TestWeComOfficialSendUsesTemplateCardWhenEnabled(t *testing.T) {
+func TestWeComOfficialSendKeepsMarkdownForProactivePlainTextWhenCardEnabled(t *testing.T) {
 	server := newWeComOfficialTestServer(t, nil)
 	defer server.close()
 
@@ -301,38 +301,19 @@ func TestWeComOfficialSendUsesTemplateCardWhenEnabled(t *testing.T) {
 	}
 
 	payload := server.waitSend(t)
-	if got, want := payload["msgtype"], "template_card"; got != want {
+	if got, want := payload["msgtype"], "markdown"; got != want {
 		t.Fatalf("msgtype = %v, want %v", got, want)
 	}
 
-	card, ok := payload["template_card"].(map[string]any)
+	markdown, ok := payload["markdown"].(map[string]any)
 	if !ok {
-		t.Fatalf("template_card missing or wrong type: %#v", payload["template_card"])
+		t.Fatalf("markdown missing or wrong type: %#v", payload["markdown"])
 	}
-	if got, want := card["card_type"], "text_notice"; got != want {
-		t.Fatalf("card_type = %v, want %v", got, want)
-	}
-	mainTitle, ok := card["main_title"].(map[string]any)
-	if !ok {
-		t.Fatalf("main_title missing or wrong type: %#v", card["main_title"])
-	}
-	if got, want := mainTitle["title"], "Ops Bot"; got != want {
-		t.Fatalf("main_title.title = %v, want %v", got, want)
-	}
-	if got, want := card["sub_title_text"], "hello from card mode"; got != want {
-		t.Fatalf("sub_title_text = %v, want %v", got, want)
-	}
-	cardAction, ok := card["card_action"].(map[string]any)
-	if !ok {
-		t.Fatalf("card_action missing or wrong type: %#v", card["card_action"])
-	}
-	if got, want := cardAction["type"], float64(1); got != want {
-		t.Fatalf("card_action.type = %v, want %v", got, want)
-	}
-	if got, want := cardAction["url"], "https://work.weixin.qq.com/"; got != want {
-		t.Fatalf("card_action.url = %v, want %v", got, want)
+	if got, want := markdown["content"], "hello from card mode"; got != want {
+		t.Fatalf("markdown.content = %v, want %v", got, want)
 	}
 }
+
 func TestWeComOfficialInboundTextPublishesToBus(t *testing.T) {
 	server := newWeComOfficialTestServer(t, func(conn *websocket.Conn) {
 		body, err := json.Marshal(map[string]any{
@@ -1095,7 +1076,7 @@ func TestWeComOfficialReplyClosesBeforeExpiryAndDefersFinalAsProactiveSend(t *te
 	defer ch.Stop(context.Background())
 	server.waitAuth(t)
 
-	task := ch.enqueueReplyTask("user-expiry", "callback-expiry")
+	task := ch.enqueueReplyTask("user-expiry", "callback-expiry", wecomOfficialReplyModeStream, "")
 	if task == nil {
 		t.Fatal("expected reply task")
 	}
@@ -1298,7 +1279,141 @@ func TestWeComOfficialReplyTemplateCardPayloadUsesReplyStreamContext(t *testing.
 		t.Fatalf("unexpected proactive send payload: %#v", payload)
 	case <-time.After(300 * time.Millisecond):
 	}
-	if active := ch.activeReplyTask("user-card-payload-1", inbound.Metadata["reply_to"]); active != nil {
-		t.Fatal("expected reply task to be removed after template card reply")
+	if active := ch.activeReplyTask("user-card-payload-1", inbound.Metadata["reply_to"]); active == nil {
+		t.Fatal("expected reply task to remain active so final text can replace placeholder")
+	}
+}
+
+func TestWeComOfficialTemplateCardEventPublishesInboundAndUpdatesCard(t *testing.T) {
+	server := newWeComOfficialTestServer(t, func(conn *websocket.Conn) {
+		body, err := json.Marshal(map[string]any{
+			"msgid":    "event-card-1",
+			"aibotid":  "bot-id",
+			"chattype": "single",
+			"chatid":   "user-card-event-1",
+			"from": map[string]any{
+				"userid": "user-card-event-1",
+			},
+			"msgtype": "event",
+			"event": map[string]any{
+				"eventtype": "template_card_event",
+				"event_key": "confirm",
+				"task_id":   "task-card-event-1",
+			},
+		})
+		if err != nil {
+			t.Errorf("marshal callback body: %v", err)
+			return
+		}
+		if err := conn.WriteJSON(wecomOfficialFrame{
+			Cmd:     wecomOfficialCmdEventCallback,
+			Headers: wecomOfficialHeaders{ReqID: "callback-card-event-1"},
+			Body:    body,
+		}); err != nil {
+			t.Errorf("write callback: %v", err)
+		}
+	})
+	defer server.close()
+
+	msgBus := bus.NewMessageBus()
+	ch, err := NewWeComOfficialChannel(config.WeComOfficialConfig{
+		Enabled:      true,
+		BotID:        "bot-id",
+		Secret:       "bot-secret",
+		WebSocketURL: server.wsURL,
+	}, msgBus)
+	if err != nil {
+		t.Fatalf("NewWeComOfficialChannel() error = %v", err)
+	}
+	ch.rememberTemplateCard(map[string]any{
+		"card_type": "button_interaction",
+		"main_title": map[string]any{
+			"title": "按钮卡片",
+			"desc":  "等待处理",
+		},
+		"sub_title_text": "请确认",
+		"button_list": []any{
+			map[string]any{
+				"text": "确认",
+				"key":  "confirm",
+			},
+		},
+		"task_id": "task-card-event-1",
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := ch.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer ch.Stop(context.Background())
+	server.waitAuth(t)
+
+	reply := server.waitReply(t)
+	if got, want := reply.Cmd, wecomOfficialCmdRespondUpdate; got != want {
+		t.Fatalf("reply cmd = %q, want %q", got, want)
+	}
+	if got, want := reply.Headers.ReqID, "callback-card-event-1"; got != want {
+		t.Fatalf("reply req_id = %q, want %q", got, want)
+	}
+	var replyBody map[string]any
+	if err := json.Unmarshal(reply.Body, &replyBody); err != nil {
+		t.Fatalf("unmarshal reply body: %v", err)
+	}
+	if got, want := replyBody["response_type"], "update_template_card"; got != want {
+		t.Fatalf("response_type = %v, want %v", got, want)
+	}
+	card, ok := replyBody["template_card"].(map[string]any)
+	if !ok {
+		t.Fatalf("template_card missing or wrong type: %#v", replyBody["template_card"])
+	}
+	if got, want := card["task_id"], "task-card-event-1"; got != want {
+		t.Fatalf("template_card.task_id = %v, want %v", got, want)
+	}
+	buttonList, ok := card["button_list"].([]any)
+	if !ok || len(buttonList) != 1 {
+		t.Fatalf("button_list missing or wrong type: %#v", card["button_list"])
+	}
+	button, ok := buttonList[0].(map[string]any)
+	if !ok {
+		t.Fatalf("button_list[0] wrong type: %#v", buttonList[0])
+	}
+	if got, want := button["text"], "处理中"; got != want {
+		t.Fatalf("button.text = %v, want %v", got, want)
+	}
+
+	consumeCtx, consumeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer consumeCancel()
+	inbound, ok := msgBus.ConsumeInbound(consumeCtx)
+	if !ok {
+		t.Fatal("expected inbound message from template card event")
+	}
+	if got, want := inbound.Metadata["event_type"], "template_card_event"; got != want {
+		t.Fatalf("Metadata[event_type] = %q, want %q", got, want)
+	}
+	if got, want := inbound.Metadata["event_key"], "confirm"; got != want {
+		t.Fatalf("Metadata[event_key] = %q, want %q", got, want)
+	}
+	if got, want := inbound.Metadata["task_id"], "task-card-event-1"; got != want {
+		t.Fatalf("Metadata[task_id] = %q, want %q", got, want)
+	}
+	if got, want := inbound.Metadata["card_auto_updated"], "true"; got != want {
+		t.Fatalf("Metadata[card_auto_updated] = %q, want %q", got, want)
+	}
+	content := `{"msgtype":"template_card","template_card":{"card_type":"button_interaction","main_title":{"title":"按钮卡片","desc":"已处理"},"button_list":[{"text":"已确认","key":"confirm"}],"task_id":"task-card-event-1","card_action":{"type":0}}}`
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel: "wecom_official",
+		ChatID:  "user-card-event-1",
+		ReplyTo: inbound.Metadata["reply_to"],
+		Content: content,
+	}); err == nil {
+		t.Fatal("expected expired callback-scoped template card send to fail")
+	} else if !strings.Contains(err.Error(), "callback window expired") {
+		t.Fatalf("Send() error = %v", err)
+	}
+	select {
+	case payload := <-server.sendCh:
+		t.Fatalf("unexpected proactive send payload: %#v", payload)
+	case <-time.After(300 * time.Millisecond):
 	}
 }

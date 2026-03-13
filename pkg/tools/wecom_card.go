@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 type WecomCardSendCallback func(ctx context.Context, channel, chatID, content string) error
@@ -14,6 +15,7 @@ type WecomCardSendCallback func(ctx context.Context, channel, chatID, content st
 type WecomCardTool struct {
 	sendCallback WecomCardSendCallback
 	sentInRound  atomic.Bool
+	defaultTitle string
 }
 
 var wecomCardTaskIDPattern = regexp.MustCompile(`^[A-Za-z0-9_@-]+$`)
@@ -24,6 +26,10 @@ func NewWecomCardTool() *WecomCardTool {
 
 func (t *WecomCardTool) SetSendCallback(callback WecomCardSendCallback) {
 	t.sendCallback = callback
+}
+
+func (t *WecomCardTool) SetDefaultTitle(title string) {
+	t.defaultTitle = strings.TrimSpace(title)
 }
 
 func (t *WecomCardTool) ResetSentInRound() {
@@ -37,14 +43,14 @@ func (t *WecomCardTool) HasSentInRound() bool {
 func (t *WecomCardTool) Name() string { return "wecom_card" }
 
 func (t *WecomCardTool) Description() string {
-	return "Generate and optionally send a native enterprise WeCom template card on `wecom_official`. Always use this instead of hand-writing raw `template_card` JSON. Supports the official `text_notice`, `news_notice`, `button_interaction`, `vote_interaction`, and `multiple_interaction` card types, validates card-type-specific rules such as `card_action`, `task_id`, list sizes, and required sections, and silently ignores empty optional objects or arrays. Decision policy: first infer user intent, then choose the card type. If the user did not explicitly request a URL jump, website link, mini-program jump, navigation target, or click-to-open behavior, do not use `card_action.type=1` or `card_action.type=2`. In that no-jump case, do not choose `text_notice` or `news_notice`; prefer a non-jump interaction card, usually `button_interaction` with `card_action.type=0`. Never invent a URL, appid, or pagepath just to satisfy a required field. For vague requests like 'send a card' or 'test a card', default to the safest non-jump interaction card. Omit optional fields that are not actually needed, and do not send an extra plain message after a successful card unless the user explicitly asked for it. Delivery is still subject to official per-chat message limits."
+	return "Generate and optionally send a native enterprise WeCom template card on `wecom_official`. Always use this instead of hand-writing raw `template_card` JSON. Supports the official `text_notice`, `news_notice`, `button_interaction`, `vote_interaction`, and `multiple_interaction` card types, validates card-type-specific rules such as `card_action`, `task_id`, list sizes, and required sections, and silently ignores empty optional objects or arrays. If the current callback is a `template_card_event`, use this tool to update the existing card in place; the matching `wecom_official` reply context will automatically use `aibot_respond_update_msg`, so do not send a separate plain message unless the user explicitly asked for one. Decision policy: first infer user intent, then choose the card type. If the user explicitly wants an image card, picture card, image presentation card, company introduction card with image, or provides an image URL to be shown in the card, prefer `news_notice`; do not downgrade that request to `button_interaction` just to avoid jump requirements. If the user did not explicitly request a URL jump, website link, mini-program jump, navigation target, or click-to-open behavior, do not use `card_action.type=1` or `card_action.type=2`. In that no-jump case, do not choose `text_notice` or `news_notice`; prefer a non-jump interaction card, usually `button_interaction` with `card_action.type=0`. Exception: if the user explicitly provides a URL and also requests an image or presentation card, you may reuse that same user-provided URL as `card_action.url` for `news_notice`; do not invent a different URL. Never invent a URL, appid, or pagepath just to satisfy a required field. For vague requests like 'send a card' or 'test a card', default to the safest non-jump interaction card. Omit optional fields that are not actually needed, and do not send an extra plain message after a successful card unless the user explicitly asked for it. Delivery is still subject to official per-chat message limits."
 }
 
 func (t *WecomCardTool) Parameters() map[string]any {
 	return objectSchema(
 		map[string]any{
 			"card_type": enumStringSchema(
-				"Official template card type to generate. If the user did not explicitly request a link or mini-program jump, do not choose `text_notice` or `news_notice`; prefer `button_interaction`, `vote_interaction`, or `multiple_interaction` instead. For vague requests like 'send a card', default to the safest non-jump interaction card.",
+				"Official template card type to generate. If the current trigger is a `template_card_event`, prefer updating the existing interactive card instead of sending a separate plain message. If the user explicitly asks for an image or picture card, prefer `news_notice`. If the user did not explicitly request a link or mini-program jump, do not choose `text_notice` or `news_notice`; prefer `button_interaction`, `vote_interaction`, or `multiple_interaction` instead. For vague requests like 'send a card', default to the safest non-jump interaction card.",
 				"text_notice",
 				"news_notice",
 				"button_interaction",
@@ -239,7 +245,7 @@ func (t *WecomCardTool) Parameters() map[string]any {
 }
 
 func (t *WecomCardTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
-	payload, result := buildWecomCardPayload(args)
+	payload, result := buildWecomCardPayloadWithDefaults(args, t.defaultTitle)
 	if result != nil {
 		return result
 	}
@@ -284,7 +290,11 @@ func (t *WecomCardTool) Execute(ctx context.Context, args map[string]any) *ToolR
 }
 
 func buildWecomCardPayload(args map[string]any) (map[string]any, *ToolResult) {
-	card, result := buildTemplateCard(args)
+	return buildWecomCardPayloadWithDefaults(args, "")
+}
+
+func buildWecomCardPayloadWithDefaults(args map[string]any, defaultTitle string) (map[string]any, *ToolResult) {
+	card, result := buildTemplateCard(args, strings.TrimSpace(defaultTitle))
 	if result != nil {
 		return nil, result
 	}
@@ -295,7 +305,7 @@ func buildWecomCardPayload(args map[string]any) (map[string]any, *ToolResult) {
 	}, nil
 }
 
-func buildTemplateCard(args map[string]any) (map[string]any, *ToolResult) {
+func buildTemplateCard(args map[string]any, defaultTitle string) (map[string]any, *ToolResult) {
 	cardType := strings.TrimSpace(strArg(args, "card_type"))
 	if cardType == "" {
 		return nil, ErrorResult("card_type is required")
@@ -371,6 +381,9 @@ func buildTemplateCard(args map[string]any) (map[string]any, *ToolResult) {
 	}
 
 	taskID := strings.TrimSpace(strArg(args, "task_id"))
+	if taskID == "" && (actionMenu != nil || cardType == "button_interaction" || cardType == "vote_interaction") {
+		taskID = generateWecomCardTaskID(cardType)
+	}
 	if taskID != "" {
 		if result := validateTaskID(taskID); result != nil {
 			return nil, result
@@ -512,7 +525,57 @@ func buildTemplateCard(args map[string]any) (map[string]any, *ToolResult) {
 		card["submit_button"] = submitButton
 	}
 
+	applyWecomCardDefaultTitle(card, defaultTitle)
+
 	return card, nil
+}
+
+func applyWecomCardDefaultTitle(card map[string]any, defaultTitle string) {
+	defaultTitle = strings.TrimSpace(defaultTitle)
+	if defaultTitle == "" {
+		return
+	}
+
+	if source, ok := card["source"].(map[string]any); ok {
+		desc, _ := source["desc"].(string)
+		desc = strings.TrimSpace(desc)
+		switch {
+		case desc == "":
+			source["desc"] = defaultTitle
+		case strings.Contains(desc, "PicoClaw"):
+			source["desc"] = strings.ReplaceAll(desc, "PicoClaw", defaultTitle)
+		}
+	} else {
+		card["source"] = map[string]any{"desc": defaultTitle}
+	}
+
+	if mainTitle, ok := card["main_title"].(map[string]any); ok {
+		title, _ := mainTitle["title"].(string)
+		title = strings.TrimSpace(title)
+		if strings.Contains(title, "PicoClaw") {
+			mainTitle["title"] = strings.ReplaceAll(title, "PicoClaw", defaultTitle)
+		}
+		desc, _ := mainTitle["desc"].(string)
+		desc = strings.TrimSpace(desc)
+		if strings.Contains(desc, "PicoClaw") {
+			mainTitle["desc"] = strings.ReplaceAll(desc, "PicoClaw", defaultTitle)
+		}
+	}
+
+	if subTitle, _ := card["sub_title_text"].(string); strings.Contains(subTitle, "PicoClaw") {
+		card["sub_title_text"] = strings.ReplaceAll(subTitle, "PicoClaw", defaultTitle)
+	}
+}
+
+func generateWecomCardTaskID(cardType string) string {
+	cardType = strings.TrimSpace(cardType)
+	if cardType == "" {
+		cardType = "card"
+	}
+	cardType = strings.ReplaceAll(cardType, "_interaction", "")
+	cardType = strings.ReplaceAll(cardType, "_notice", "")
+	cardType = strings.ReplaceAll(cardType, "_", "-")
+	return fmt.Sprintf("%s-%s", cardType, time.Now().UTC().Format("20060102-150405"))
 }
 
 func buildSource(args map[string]any, key string) (map[string]any, *ToolResult) {

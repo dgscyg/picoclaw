@@ -52,16 +52,17 @@ type AgentLoop struct {
 
 // processOptions configures how a message is processed
 type processOptions struct {
-	SessionKey      string   // Session identifier for history/context
-	Channel         string   // Target channel for tool execution
-	ChatID          string   // Target chat ID for tool execution
-	ReplyTo         string   // Optional channel-specific reply correlation token
-	UserMessage     string   // User message content (may include prefix)
-	Media           []string // media:// refs from inbound message
-	DefaultResponse string   // Response when LLM returns empty
-	EnableSummary   bool     // Whether to trigger summarization
-	SendResponse    bool     // Whether to send response via bus
-	NoHistory       bool     // If true, don't load session history (for heartbeat)
+	SessionKey           string   // Session identifier for history/context
+	Channel              string   // Target channel for tool execution
+	ChatID               string   // Target chat ID for tool execution
+	ReplyTo              string   // Optional channel-specific reply correlation token
+	SuppressPostCardText bool     // If true, suppress final assistant text after direct card delivery
+	UserMessage          string   // User message content (may include prefix)
+	Media                []string // media:// refs from inbound message
+	DefaultResponse      string   // Response when LLM returns empty
+	EnableSummary        bool     // Whether to trigger summarization
+	SendResponse         bool     // Whether to send response via bus
+	NoHistory            bool     // If true, don't load session history (for heartbeat)
 }
 
 const (
@@ -104,8 +105,52 @@ func NewAgentLoop(
 		fallback:    fallbackChain,
 		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
 	}
+	al.installSharedSendCallbacks()
 
 	return al
+}
+
+func (al *AgentLoop) installSharedSendCallbacks() {
+	if al == nil {
+		return
+	}
+	al.registry.ForEachTool("message", func(t tools.Tool) {
+		if mt, ok := t.(*tools.MessageTool); ok {
+			mt.SetSendCallback(al.sendToolMessage)
+		}
+	})
+	al.registry.ForEachTool("wecom_card", func(t tools.Tool) {
+		if wt, ok := t.(*tools.WecomCardTool); ok {
+			wt.SetSendCallback(al.sendToolMessage)
+		}
+	})
+}
+
+func (al *AgentLoop) sendToolMessage(
+	ctx context.Context,
+	channel, chatID, content string,
+) error {
+	if channel == "wecom_official" && al.channelManager != nil {
+		if ch, ok := al.channelManager.GetChannel(channel); ok {
+			sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			return ch.Send(sendCtx, bus.OutboundMessage{
+				Channel: channel,
+				ChatID:  chatID,
+				Content: content,
+				ReplyTo: tools.ToolReplyTo(ctx),
+			})
+		}
+	}
+
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer pubCancel()
+	return al.bus.PublishOutbound(pubCtx, bus.OutboundMessage{
+		Channel: channel,
+		ChatID:  chatID,
+		Content: content,
+		ReplyTo: tools.ToolReplyTo(ctx),
+	})
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
@@ -185,6 +230,7 @@ func registerSharedTools(
 			agent.Tools.Register(messageTool)
 
 			wecomCardTool := tools.NewWecomCardTool()
+			wecomCardTool.SetDefaultTitle(cfg.Channels.WeComOfficial.Card.Title)
 			wecomCardTool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
 				pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer pubCancel()
@@ -362,10 +408,19 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					alreadySent := false
 					defaultAgent := al.registry.GetDefaultAgent()
 					if defaultAgent != nil {
-						alreadySent = didAnyRoundSendTrackerSend(defaultAgent, "message", "wecom_card")
+						alreadySent = didAnyRoundSendTrackerSend(defaultAgent, "message")
+						if inboundMetadata(msg, "event_type") == "template_card_event" {
+							alreadySent = alreadySent || didAnyRoundSendTrackerSend(defaultAgent, "wecom_card")
+						}
 					}
 
-					if !alreadySent {
+					if inboundMetadata(msg, "event_type") == "template_card_event" {
+						logger.DebugCF(
+							"agent",
+							"Skipped outbound for template_card_event direct answer",
+							map[string]any{"channel": msg.Channel},
+						)
+					} else if !alreadySent {
 						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
 							Channel: msg.Channel,
 							ChatID:  msg.ChatID,
@@ -631,15 +686,16 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		})
 
 	return al.runAgentLoop(ctx, agent, processOptions{
-		SessionKey:      sessionKey,
-		Channel:         msg.Channel,
-		ChatID:          msg.ChatID,
-		ReplyTo:         inboundMetadata(msg, "reply_to"),
-		UserMessage:     msg.Content,
-		Media:           msg.Media,
-		DefaultResponse: defaultResponse,
-		EnableSummary:   true,
-		SendResponse:    false,
+		SessionKey:           sessionKey,
+		Channel:              msg.Channel,
+		ChatID:               msg.ChatID,
+		ReplyTo:              inboundMetadata(msg, "reply_to"),
+		SuppressPostCardText: inboundMetadata(msg, "event_type") == "template_card_event",
+		UserMessage:          msg.Content,
+		Media:                msg.Media,
+		DefaultResponse:      defaultResponse,
+		EnableSummary:        true,
+		SendResponse:         false,
 	})
 }
 
@@ -741,6 +797,10 @@ func shouldSuppressPostSendAck(content string) bool {
 		return true
 	}
 	return false
+}
+
+func shouldSuppressPostCardResponse(content string) bool {
+	return strings.TrimSpace(content) != ""
 }
 
 func (al *AgentLoop) processSystemMessage(
@@ -872,7 +932,16 @@ func (al *AgentLoop) runAgentLoop(
 
 	// If last tool had ForUser content and we already sent it, we might not need to send final response
 	// This is controlled by the tool's Silent flag and ForUser content
-	if didAnyRoundSendTrackerSend(agent, "message", "wecom_card") && shouldSuppressPostSendAck(finalContent) {
+	if opts.SuppressPostCardText && didAnyRoundSendTrackerSend(agent, "wecom_card") && shouldSuppressPostCardResponse(finalContent) {
+		logger.DebugCF("agent", "Suppressing post-card assistant text after direct tool delivery",
+			map[string]any{
+				"agent_id":    agent.ID,
+				"session_key": opts.SessionKey,
+				"content":     finalContent,
+			})
+		return "", nil
+	}
+	if didAnyRoundSendTrackerSend(agent, "message") && shouldSuppressPostSendAck(finalContent) {
 		logger.DebugCF("agent", "Suppressing post-send acknowledgement after direct tool delivery",
 			map[string]any{
 				"agent_id":    agent.ID,

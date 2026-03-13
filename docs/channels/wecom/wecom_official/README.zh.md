@@ -5,7 +5,7 @@
 1. 作为企业微信官方机器人单聊或群聊入口。
 2. 在已有会话中主动推送消息，而不暴露公网 webhook 回调地址。
 
-它与 `wecom_aibot` 的区别是：`wecom_official` 不走 webhook + polling，而是直接走企业微信官方长连接协议，支持基于原始 `req_id` 的 `replyStream`、`stream_with_template_card`、欢迎语回复，以及独立的主动消息推送。
+它与 `wecom_aibot` 的区别是：`wecom_official` 不走 webhook + polling，而是直接走企业微信官方长连接协议，支持基于原始 `req_id` 的 `replyStream`、显式 `template_card` 回复、`aibot_respond_update_msg` 卡片更新、欢迎语回复，以及独立的主动消息推送。
 
 ## 与其他 WeCom 通道的区别
 
@@ -14,7 +14,7 @@
 | `wecom` | Webhook | 受限 | 是 | 否 | 通常需要 |
 | `wecom_app` | Webhook + 企业微信应用 API | 是 | 否 | 否 | 需要 |
 | `wecom_aibot` | Webhook + stream polling | 是 | 是 | 是 | 需要 |
-| `wecom_official` | WebSocket 长连接 | 是 | 是 | 是，官方 `replyStream` / `stream_with_template_card` | 否 |
+| `wecom_official` | WebSocket 长连接 | 是 | 是 | 是，官方 `replyStream` / `template_card` / `aibot_respond_update_msg` | 否 |
 
 ## 配置
 
@@ -54,7 +54,7 @@
 | `placeholder.text` | string | 否 | 占位文案；为空时默认 `Thinking... 💭` |
 | `sendThinkingMessage` | bool | 否 | 兼容旧插件配置名，等价于 `placeholder.enabled` |
 | `card.enabled` | bool | 否 | 是否启用通道内文本转官方模板卡片渲染 |
-| `card.title` | string | 否 | 模板卡片主标题；为空时默认 `PicoClaw` |
+| `card.title` | string | 否 | 默认卡片品牌标题；为空时默认 `PicoClaw`。该值会用于通道内自动卡片，也会作为 `wecom_card` 的默认品牌标题 |
 | `welcome_message` | string | 否 | 用户触发 `enter_chat` 时发送的欢迎语；留空则不发送 |
 | `reasoning_channel_id` | string | 否 | 将 reasoning 输出路由到指定 channel 目标 ID |
 
@@ -88,15 +88,15 @@ picoclaw gateway
 
 - 有活跃官方回调上下文时，PicoClaw 会复用原始 `req_id`。
 - 思考占位启用时，先发送一条 `finish=false` 的 `replyStream` 占位消息。
-- 正式回复仍走同一个 `stream_id`。
-- 卡片关闭时，整个过程都使用普通 `replyStream`。
-- 卡片开启时，首个正式回复帧会使用 `stream_with_template_card` 挂载模板卡片，后续继续沿用同一个 `stream_id` 走普通 `replyStream` 收尾。
+- 普通文本回复继续复用同一个 `stream_id`，最终 `finish=true` 收尾。
+- 如果 agent 或 tool 显式发送 `template_card` payload，例如通过 `wecom_card` tool，通道会改走 `aibot_respond_msg + template_card` 回复当前会话。
+- 显式卡片回复不会替代后续普通文本流；若同一轮后续仍有最终文本回复，它仍会继续复用原 `stream_id` 去覆盖占位流。
 
 ### 主动通知
 
 - 没有活跃回调上下文时，PicoClaw 会走 `aibot_send_msg`。
-- 卡片关闭时，主动消息发送 `markdown`。
-- 卡片开启时，主动消息发送 `template_card`。
+- 普通主动消息统一发送 `markdown`。
+- 只有显式结构化卡片 payload，例如 `wecom_card` 或原始 `template_card` JSON，才会主动发送 `template_card`。
 
 ### 欢迎语
 
@@ -113,22 +113,15 @@ picoclaw gateway
 - `sendMessage(template_card)`
 - `updateTemplateCard`
 
-PicoClaw 当前在 `wecom_official` 中已经接通第一层卡片能力：
+PicoClaw 当前在 `wecom_official` 中已经接通结构化卡片能力：
 
 - 通道内文本转模板卡片渲染。
-- 主动消息走 `template_card`。
-- 回调内首个正式流式帧走 `stream_with_template_card` 挂卡片，最终仍由普通 `replyStream` 收尾。
+- `wecom_card` tool 直接生成并发送企业微信官方 `template_card`。
+- 普通主动消息默认走 `markdown`，显式卡片 payload 才走 `template_card`。
+- `template_card_event` 到达后，会优先在 5 秒窗口内自动执行一次 `aibot_respond_update_msg`，把卡片更新为“处理中”状态，避免长耗时 LLM 推理错过窗口。
 - 欢迎语可按卡片模式回复。
 
-如果 agent 需要主动发送企业微信卡片消息，可以直接通过 `message` tool 发送原始 JSON 文本，格式为 `{"msgtype":"template_card","template_card":{...}}`。当前通道会识别这个 payload 并按真正的企业微信 `template_card` 发送，不需要先搜索工作目录或查找额外模板文件。
-
-当前仍未接通的是第二层结构化卡片能力：
-
-- agent 或 tool 显式产出完整卡片 payload。
-- `template_card_event` 回调后的 `aibot_respond_update_msg` 更新链路。
-- 面向按钮、下拉、投票等交互控件的结构化出站模型。
-
-也就是说，当前卡片更适合“展示型卡片”，而不是“强交互型卡片”。
+如果 agent 需要发送企业微信卡片消息，应优先使用 `wecom_card` tool，而不是通过 `message` tool 手写原始 JSON。
 
 ## 适用边界
 
@@ -151,5 +144,5 @@ PicoClaw 当前在 `wecom_official` 中已经接通第一层卡片能力：
 
 ### 卡片按钮点击后没有后续动作
 
-- 当前 `wecom_official` 只支持展示型卡片。
-- `template_card_event` 到 `aibot_respond_update_msg` 的交互更新链路仍未接入。
+- `template_card_event` 的更新窗口只有 5 秒；自动“处理中”更新之外，后续更复杂的二次卡片更新必须在窗口内完成，否则通道会拒绝回退成新的主动卡片发送。
+- 按钮卡片的可用字段必须遵守企业微信模板卡片类型限制，例如 `button_interaction` 不支持 `vertical_content_list`。

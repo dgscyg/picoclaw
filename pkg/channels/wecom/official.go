@@ -36,6 +36,7 @@ const (
 	wecomOfficialCmdSubscribe       = "aibot_subscribe"
 	wecomOfficialCmdHeartbeat       = "ping"
 	wecomOfficialCmdRespondMessage  = "aibot_respond_msg"
+	wecomOfficialCmdRespondUpdate   = "aibot_respond_update_msg"
 	wecomOfficialCmdRespondWelcome  = "aibot_respond_welcome_msg"
 	wecomOfficialCmdSendMessage     = "aibot_send_msg"
 	wecomOfficialCmdMessageCallback = "aibot_msg_callback"
@@ -58,6 +59,12 @@ const (
 	wecomOfficialReplyIdleClose       = 250 * time.Millisecond
 	wecomOfficialReplyTaskMaxAge      = 10 * time.Minute
 	wecomOfficialStreamUpdateExpiry   = 6 * time.Minute
+	wecomOfficialUpdateTaskMaxAge     = 5 * time.Second
+)
+
+const (
+	wecomOfficialReplyModeStream             = "stream"
+	wecomOfficialReplyModeUpdateTemplateCard = "update_template_card"
 )
 
 var (
@@ -172,6 +179,8 @@ type wecomOfficialReplyTask struct {
 	StreamID     string
 	CreatedAt    time.Time
 	EditDeadline time.Time
+	ResponseMode string
+	TaskID       string
 
 	accumulated          string
 	cardSent             bool
@@ -236,6 +245,8 @@ type WeComOfficialChannel struct {
 	pendingAcks   map[string]chan wecomOfficialWaitResult
 	taskMu        sync.Mutex
 	replyTasks    map[string][]*wecomOfficialReplyTask
+	cardMu        sync.RWMutex
+	cardStates    map[string]map[string]any
 }
 
 // NewWeComOfficialChannel creates a new official WeCom websocket channel instance.
@@ -267,6 +278,7 @@ func NewWeComOfficialChannel(
 		processedMsgs: NewMessageDeduplicator(wecomMaxProcessedMessages),
 		pendingAcks:   make(map[string]chan wecomOfficialWaitResult),
 		replyTasks:    make(map[string][]*wecomOfficialReplyTask),
+		cardStates:    make(map[string]map[string]any),
 	}, nil
 }
 
@@ -314,22 +326,28 @@ func (c *WeComOfficialChannel) Send(ctx context.Context, msg bus.OutboundMessage
 		if task != nil {
 			return c.sendReplyTemplateCard(ctx, task, payload)
 		}
+		if strings.TrimSpace(msg.ReplyTo) != "" {
+			return fmt.Errorf("wecom_official template card callback window expired; cannot fall back to proactive send: %w", channels.ErrSendFailed)
+		}
 		_, err := c.sendCommandAndWait(ctx, wecomOfficialCmdSendMessage, map[string]any{
 			"chatid":        msg.ChatID,
 			"msgtype":       "template_card",
 			"template_card": payload,
 		}, wecomOfficialSendTimeout)
+		if err == nil {
+			c.rememberTemplateCard(payload)
+		}
 		return err
+	}
+	if task != nil && task.ResponseMode == wecomOfficialReplyModeUpdateTemplateCard {
+		c.removeReplyTask(task)
+		return c.sendMarkdownMessage(ctx, msg.ChatID, msg.Content)
 	}
 	if task != nil {
 		if err := c.sendReplyChunk(ctx, task, msg.Content); err != nil {
 			return err
 		}
 		return nil
-	}
-
-	if c.cardEnabled() {
-		return c.sendTemplateCardMessage(ctx, msg.ChatID, msg.Content)
 	}
 
 	return c.sendMarkdownMessage(ctx, msg.ChatID, msg.Content)
@@ -635,7 +653,7 @@ func (c *WeComOfficialChannel) processIncomingMessage(frame wecomOfficialFrame, 
 		"preview":   utils.Truncate(content, 80),
 	})
 
-	task := c.enqueueReplyTask(chatID, frame.Headers.ReqID)
+	task := c.enqueueReplyTask(chatID, frame.Headers.ReqID, wecomOfficialReplyModeStream, "")
 	c.maybeSendThinkingPlaceholder(task)
 	c.HandleMessage(c.ctx, peer, msg.MsgID, userID, chatID, content, mediaRefs, metadata, sender)
 }
@@ -644,13 +662,19 @@ func (c *WeComOfficialChannel) handleEventMessage(frame wecomOfficialFrame, chat
 	if msg.Event == nil {
 		return
 	}
-	if msg.Event.EventType != "enter_chat" {
+	switch msg.Event.EventType {
+	case "enter_chat":
+		c.handleEnterChatEvent(frame, chatID)
+	case "template_card_event":
+		c.handleTemplateCardEvent(frame, chatID, msg)
+	default:
 		logger.DebugCF("wecom_official", "Ignoring event callback", map[string]any{
 			"event_type": msg.Event.EventType,
 		})
-		return
 	}
+}
 
+func (c *WeComOfficialChannel) handleEnterChatEvent(frame wecomOfficialFrame, chatID string) {
 	welcome := strings.TrimSpace(c.config.WelcomeMessage)
 	if welcome == "" {
 		return
@@ -670,6 +694,110 @@ func (c *WeComOfficialChannel) handleEventMessage(frame wecomOfficialFrame, chat
 			"error":   err.Error(),
 		})
 	}
+}
+
+func (c *WeComOfficialChannel) handleTemplateCardEvent(
+	frame wecomOfficialFrame,
+	chatID string,
+	msg wecomOfficialMessage,
+) {
+	if msg.Event == nil {
+		return
+	}
+
+	userID := strings.TrimSpace(msg.From.UserID)
+	if userID == "" {
+		userID = "unknown"
+	}
+	if chatID == "" {
+		chatID = userID
+	}
+
+	eventKey := strings.TrimSpace(msg.Event.EventKey)
+	taskID := strings.TrimSpace(msg.Event.TaskID)
+	contentParts := []string{"Template card event triggered."}
+	if eventKey != "" {
+		contentParts = append(contentParts, fmt.Sprintf("event_key=%s.", eventKey))
+	}
+	if taskID != "" {
+		contentParts = append(contentParts, fmt.Sprintf("task_id=%s.", taskID))
+	}
+	autoUpdated := false
+	if taskID != "" {
+		updateCtx, cancel := context.WithTimeout(c.ctx, wecomOfficialSendTimeout)
+		updated, err := c.sendAutomaticTemplateCardEventUpdate(updateCtx, frame.Headers.ReqID, taskID, eventKey)
+		cancel()
+		if err != nil {
+			logger.WarnCF("wecom_official", "Failed to auto-update template card event", map[string]any{
+				"chat_id":     chatID,
+				"callback_id": frame.Headers.ReqID,
+				"task_id":     taskID,
+				"event_key":   eventKey,
+				"error":       err.Error(),
+			})
+		} else {
+			autoUpdated = updated
+		}
+	}
+	if autoUpdated {
+		contentParts = append(contentParts, "The card has already been updated to a pending state. Do not call `wecom_card` again for this event. If you need to notify the user after processing, send a separate markdown message instead.")
+	} else {
+		contentParts = append(contentParts, "If you need to update the existing template card, do it immediately with `wecom_card`; otherwise send a separate markdown message.")
+	}
+	content := strings.Join(contentParts, " ")
+
+	peer := bus.Peer{Kind: "direct", ID: chatID}
+	if msg.ChatType == "group" {
+		peer = bus.Peer{Kind: "group", ID: chatID}
+	}
+
+	metadata := map[string]string{
+		"msg_type":   msg.MsgType,
+		"chat_type":  msg.ChatType,
+		"msgid":      msg.MsgID,
+		"aibotid":    msg.AIBotID,
+		"req_id":     frame.Headers.ReqID,
+		"reply_to":   frame.Headers.ReqID,
+		"event_type": msg.Event.EventType,
+	}
+	if eventKey != "" {
+		metadata["event_key"] = eventKey
+	}
+	if taskID != "" {
+		metadata["task_id"] = taskID
+	}
+	if autoUpdated {
+		metadata["card_auto_updated"] = "true"
+	}
+	if msg.ResponseURL != "" {
+		metadata["response_url"] = msg.ResponseURL
+	}
+
+	var task *wecomOfficialReplyTask
+	if !autoUpdated {
+		task = c.enqueueReplyTask(chatID, frame.Headers.ReqID, wecomOfficialReplyModeUpdateTemplateCard, taskID)
+	}
+	sender := bus.SenderInfo{
+		Platform:    "wecom_official",
+		PlatformID:  userID,
+		CanonicalID: identity.BuildCanonicalID("wecom_official", userID),
+		DisplayName: userID,
+	}
+	logger.DebugCF("wecom_official", "Received template card event", map[string]any{
+		"chat_id":     chatID,
+		"sender_id":   userID,
+		"event_key":   eventKey,
+		"task_id":     taskID,
+		"callback_id": frame.Headers.ReqID,
+	})
+	if task == nil {
+		logger.DebugCF("wecom_official", "No live template card update task retained for event", map[string]any{
+			"chat_id":      chatID,
+			"callback_id":  frame.Headers.ReqID,
+			"auto_updated": autoUpdated,
+		})
+	}
+	c.HandleMessage(c.ctx, peer, msg.MsgID, userID, chatID, content, nil, metadata, sender)
 }
 
 func parseWeComOfficialMessage(msg wecomOfficialMessage) (string, []wecomOfficialMediaSource, string) {
@@ -1167,11 +1295,7 @@ func (c *WeComOfficialChannel) deliverDeferredFinal(task *wecomOfficialReplyTask
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), wecomOfficialSendTimeout)
 	defer cancel()
-	sendFinal := c.sendMarkdownMessage
-	if c.cardEnabled() {
-		sendFinal = c.sendTemplateCardMessage
-	}
-	if err := sendFinal(ctx, chatID, content); err != nil {
+	if err := c.sendMarkdownMessage(ctx, chatID, content); err != nil {
 		logger.WarnCF("wecom_official", "Failed to deliver deferred final response", map[string]any{
 			"chat_id": chatID,
 			"error":   err.Error(),
@@ -1260,28 +1384,209 @@ func (c *WeComOfficialChannel) sendReplyTemplateCard(
 		task.timer = nil
 	}
 	task.sequence++
-	if err := c.sendReplyTemplateCardPayload(ctx, task.ReqID, templateCard); err != nil {
+	if err := c.sendReplyTemplateCardPayload(ctx, task, templateCard); err != nil {
 		task.mu.Unlock()
 		return err
 	}
 	task.cardSent = true
-	task.finalized = true
+	if task.ResponseMode == wecomOfficialReplyModeUpdateTemplateCard {
+		task.finalized = true
+		task.mu.Unlock()
+		c.removeReplyTask(task)
+		return nil
+	}
 	task.mu.Unlock()
-
-	c.removeReplyTask(task)
 	return nil
 }
 
 func (c *WeComOfficialChannel) sendReplyTemplateCardPayload(
 	ctx context.Context,
-	reqID string,
+	task *wecomOfficialReplyTask,
 	templateCard map[string]any,
 ) error {
-	_, err := c.sendCommandWithReqIDAndWait(ctx, reqID, wecomOfficialCmdRespondMessage, map[string]any{
+	if task == nil {
+		return nil
+	}
+	if task.ResponseMode == wecomOfficialReplyModeUpdateTemplateCard {
+		if task.TaskID != "" {
+			templateCard["task_id"] = task.TaskID
+		}
+		_, err := c.sendCommandWithReqIDAndWait(ctx, task.ReqID, wecomOfficialCmdRespondUpdate, map[string]any{
+			"response_type": "update_template_card",
+			"template_card": templateCard,
+		}, wecomOfficialSendTimeout)
+		if err == nil {
+			c.rememberTemplateCard(templateCard)
+		}
+		return err
+	}
+	_, err := c.sendCommandWithReqIDAndWait(ctx, task.ReqID, wecomOfficialCmdRespondMessage, map[string]any{
 		"msgtype":       "template_card",
 		"template_card": templateCard,
 	}, wecomOfficialSendTimeout)
+	if err == nil {
+		c.rememberTemplateCard(templateCard)
+	}
 	return err
+}
+
+func (c *WeComOfficialChannel) rememberTemplateCard(templateCard map[string]any) {
+	taskID := templateCardTaskID(templateCard)
+	if taskID == "" {
+		return
+	}
+	cloned, err := cloneTemplateCard(templateCard)
+	if err != nil {
+		logger.WarnCF("wecom_official", "Failed to clone template card state", map[string]any{
+			"task_id": taskID,
+			"error":   err.Error(),
+		})
+		return
+	}
+	c.cardMu.Lock()
+	defer c.cardMu.Unlock()
+	c.cardStates[taskID] = cloned
+}
+
+func (c *WeComOfficialChannel) cardState(taskID string) map[string]any {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	c.cardMu.RLock()
+	card := c.cardStates[taskID]
+	c.cardMu.RUnlock()
+	if card == nil {
+		return nil
+	}
+	cloned, err := cloneTemplateCard(card)
+	if err != nil {
+		return nil
+	}
+	return cloned
+}
+
+func (c *WeComOfficialChannel) sendAutomaticTemplateCardEventUpdate(
+	ctx context.Context,
+	reqID, taskID, eventKey string,
+) (bool, error) {
+	card := c.cardState(taskID)
+	if card == nil {
+		return false, nil
+	}
+	updated := applyAutomaticTemplateCardEventMutation(card, eventKey)
+	if !updated {
+		return false, nil
+	}
+	_, err := c.sendCommandWithReqIDAndWait(ctx, reqID, wecomOfficialCmdRespondUpdate, map[string]any{
+		"response_type": "update_template_card",
+		"template_card": card,
+	}, wecomOfficialSendTimeout)
+	if err != nil {
+		return false, err
+	}
+	c.rememberTemplateCard(card)
+	return true, nil
+}
+
+func applyAutomaticTemplateCardEventMutation(card map[string]any, eventKey string) bool {
+	cardType, _ := card["card_type"].(string)
+	eventKey = strings.TrimSpace(eventKey)
+	updated := false
+
+	if subTitle, ok := card["sub_title_text"].(string); ok {
+		if strings.TrimSpace(subTitle) != "已收到操作，处理中..." {
+			card["sub_title_text"] = "已收到操作，处理中..."
+			updated = true
+		}
+	} else {
+		card["sub_title_text"] = "已收到操作，处理中..."
+		updated = true
+	}
+
+	switch cardType {
+	case "button_interaction":
+		if buttonList, ok := card["button_list"].([]any); ok {
+			for _, raw := range buttonList {
+				button, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				key, _ := button["key"].(string)
+				if eventKey != "" && key == eventKey {
+					button["text"] = "处理中"
+					button["style"] = 3
+					updated = true
+				}
+			}
+		}
+		if selection, ok := card["button_selection"].(map[string]any); ok {
+			selection["disable"] = true
+			updated = true
+		}
+	case "vote_interaction":
+		if checkbox, ok := card["checkbox"].(map[string]any); ok {
+			checkbox["disable"] = true
+			updated = true
+		}
+		if submit, ok := card["submit_button"].(map[string]any); ok {
+			submit["text"] = "处理中"
+			updated = true
+		}
+	case "multiple_interaction":
+		if selectList, ok := card["select_list"].([]any); ok {
+			for _, raw := range selectList {
+				item, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				item["disable"] = true
+				updated = true
+			}
+		}
+		if submit, ok := card["submit_button"].(map[string]any); ok {
+			submit["text"] = "处理中"
+			updated = true
+		}
+	}
+
+	return updated
+}
+
+func templateCardTaskID(card map[string]any) string {
+	taskID, _ := card["task_id"].(string)
+	return strings.TrimSpace(taskID)
+}
+
+func cloneTemplateCard(card map[string]any) (map[string]any, error) {
+	raw, err := json.Marshal(card)
+	if err != nil {
+		return nil, err
+	}
+	var cloned map[string]any
+	if err := json.Unmarshal(raw, &cloned); err != nil {
+		return nil, err
+	}
+	return cloned, nil
+}
+
+func templateCardStreamContent(card map[string]any) string {
+	parts := make([]string, 0, 3)
+	if mainTitle, ok := card["main_title"].(map[string]any); ok {
+		if title, _ := mainTitle["title"].(string); strings.TrimSpace(title) != "" {
+			parts = append(parts, strings.TrimSpace(title))
+		}
+		if desc, _ := mainTitle["desc"].(string); strings.TrimSpace(desc) != "" {
+			parts = append(parts, strings.TrimSpace(desc))
+		}
+	}
+	if subTitle, _ := card["sub_title_text"].(string); strings.TrimSpace(subTitle) != "" {
+		parts = append(parts, strings.TrimSpace(subTitle))
+	}
+	if len(parts) == 0 {
+		return "Template card updated"
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (c *WeComOfficialChannel) sendWelcomeText(ctx context.Context, reqID, content string) error {
@@ -1376,11 +1681,17 @@ func (c *WeComOfficialChannel) sendCommandWithReqIDAndWait(
 	}
 }
 
-func (c *WeComOfficialChannel) enqueueReplyTask(chatID, reqID string) *wecomOfficialReplyTask {
+func (c *WeComOfficialChannel) enqueueReplyTask(
+	chatID, reqID, responseMode, taskID string,
+) *wecomOfficialReplyTask {
 	chatID = strings.TrimSpace(chatID)
 	reqID = strings.TrimSpace(reqID)
 	if chatID == "" || reqID == "" {
 		return nil
+	}
+	responseMode = strings.TrimSpace(responseMode)
+	if responseMode == "" {
+		responseMode = wecomOfficialReplyModeStream
 	}
 
 	c.taskMu.Lock()
@@ -1390,9 +1701,13 @@ func (c *WeComOfficialChannel) enqueueReplyTask(chatID, reqID string) *wecomOffi
 	task := &wecomOfficialReplyTask{
 		ReqID:        reqID,
 		ChatID:       chatID,
-		StreamID:     generateWeComOfficialReqID("stream"),
 		CreatedAt:    time.Now(),
 		EditDeadline: time.Now().Add(wecomOfficialStreamUpdateExpiry),
+		ResponseMode: responseMode,
+		TaskID:       strings.TrimSpace(taskID),
+	}
+	if responseMode == wecomOfficialReplyModeStream {
+		task.StreamID = generateWeComOfficialReqID("stream")
 	}
 	c.replyTasks[chatID] = append(c.replyTasks[chatID], task)
 	return task
@@ -1423,7 +1738,11 @@ func (c *WeComOfficialChannel) compactReplyTasksLocked(chatID string) {
 	now := time.Now()
 	for len(queue) > 0 {
 		head := queue[0]
-		expired := now.Sub(head.CreatedAt) > wecomOfficialReplyTaskMaxAge
+		maxAge := wecomOfficialReplyTaskMaxAge
+		if head != nil && head.ResponseMode == wecomOfficialReplyModeUpdateTemplateCard {
+			maxAge = wecomOfficialUpdateTaskMaxAge
+		}
+		expired := now.Sub(head.CreatedAt) > maxAge
 		head.mu.Lock()
 		finalized := head.finalized
 		if finalized || expired {

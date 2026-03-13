@@ -22,7 +22,7 @@ func (t *MessageTool) Name() string {
 }
 
 func (t *MessageTool) Description() string {
-	return "Send a plain message to the user on a chat channel. Use this when you want to communicate something. For `wecom_official`, you may send an independent proactive ordinary message by setting `separate_message=true`. For enterprise WeCom template card messages, use the dedicated `wecom_card` tool instead of hand-writing raw `template_card` JSON here."
+	return "Send a plain message to the user on a chat channel. Use this when you want to communicate something. For `wecom_official`, you may send an independent proactive ordinary message by setting `separate_message=true`; that path sends an ordinary markdown message, not a template card. For enterprise WeCom template card messages or template-card updates, use the dedicated `wecom_card` tool instead of hand-writing raw `template_card` JSON here."
 }
 
 func (t *MessageTool) Parameters() map[string]any {
@@ -31,7 +31,7 @@ func (t *MessageTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"content": map[string]any{
 				"type":        "string",
-				"description": "The plain text or markdown message content to send. For enterprise WeCom template cards, use the `wecom_card` tool instead.",
+				"description": "The plain text or markdown message content to send. For enterprise WeCom template cards or template-card updates, use the `wecom_card` tool instead.",
 			},
 			"channel": map[string]any{
 				"type":        "string",
