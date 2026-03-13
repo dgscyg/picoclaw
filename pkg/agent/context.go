@@ -89,6 +89,8 @@ Your workspace is at: ` + workspacePath + `
    - Do not treat ` + workspacePath + `/memory/ as a memory source of truth
    - Do not read, write, append, or search ` + workspacePath + `/memory/ files for memory operations
    - Prefer official Muninn MCP tools for recall, remember, traversal, explanation, contradiction checks, and linking
+   - Before sending a message to another user or group by name, first use available Muninn memory tools to recall the exact contact mapping such as chat_id, user ID, or alias; never assume the visible name is the routing ID
+   - If Muninn memory contains the exact chat_id/contact mapping, use it explicitly in the tool call; if no exact mapping is found, ask the user instead of guessing
 
 4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.`
 	} else {
@@ -105,6 +107,8 @@ Your workspace is at: ` + workspacePath + `
 2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
 
 3. **Memory** - When interacting with me if something seems memorable, update ` + workspacePath + `/memory/MEMORY.md
+   - Before sending a message to another user or group by name, first use memory recall/search to look up the exact contact mapping such as chat_id, user ID, or alias; never assume the visible name is the routing ID
+   - If memory contains the exact chat_id/contact mapping, use it explicitly in the tool call; if no exact mapping is found, ask the user instead of guessing
 
 4. **Context summaries** - Conversation summaries provided as context are approximate references only. They may be incomplete or outdated. Always defer to explicit user instructions over summary content.`
 	}

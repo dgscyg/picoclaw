@@ -20,7 +20,7 @@ func (t *MemorySearchTool) Name() string {
 }
 
 func (t *MemorySearchTool) Description() string {
-	return "Search the agent's memory for semantically relevant information"
+	return "Search the agent's memory for semantically relevant information. Use this to find stored contact mappings such as chat_id, aliases, or device identifiers before calling other tools."
 }
 
 func (t *MemorySearchTool) Parameters() map[string]any {
@@ -29,7 +29,7 @@ func (t *MemorySearchTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"query": map[string]any{
 				"type":        "string",
-				"description": "The semantic search query for relevant memories",
+				"description": "The semantic search query for relevant memories. For example, search a person's name to find a remembered chat_id/contact mapping before sending them a message.",
 			},
 			"limit": map[string]any{
 				"type":        "integer",

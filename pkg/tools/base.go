@@ -24,6 +24,8 @@ var (
 	ctxKeyChannel = &toolCtxKey{"channel"}
 	ctxKeyChatID  = &toolCtxKey{"chatID"}
 	ctxKeyReplyTo = &toolCtxKey{"replyTo"}
+	ctxKeyRoundID = &toolCtxKey{"roundID"}
+	ctxKeyUserMsg = &toolCtxKey{"userMessage"}
 )
 
 // WithToolContext returns a child context carrying channel and chatID.
@@ -38,6 +40,16 @@ func WithToolRoutingContext(ctx context.Context, channel, chatID, replyTo string
 	ctx = context.WithValue(ctx, ctxKeyChatID, chatID)
 	ctx = context.WithValue(ctx, ctxKeyReplyTo, replyTo)
 	return ctx
+}
+
+// WithToolRoundID returns a child context carrying the current tool-execution round ID.
+func WithToolRoundID(ctx context.Context, roundID string) context.Context {
+	return context.WithValue(ctx, ctxKeyRoundID, roundID)
+}
+
+// WithToolUserMessage returns a child context carrying the current inbound user message.
+func WithToolUserMessage(ctx context.Context, userMessage string) context.Context {
+	return context.WithValue(ctx, ctxKeyUserMsg, userMessage)
 }
 
 // ToolChannel extracts the channel from ctx, or "" if unset.
@@ -55,6 +67,18 @@ func ToolChatID(ctx context.Context) string {
 // ToolReplyTo extracts the reply correlation token from ctx, or "" if unset.
 func ToolReplyTo(ctx context.Context) string {
 	v, _ := ctx.Value(ctxKeyReplyTo).(string)
+	return v
+}
+
+// ToolRoundID extracts the per-processing-round identifier from ctx, or "" if unset.
+func ToolRoundID(ctx context.Context) string {
+	v, _ := ctx.Value(ctxKeyRoundID).(string)
+	return v
+}
+
+// ToolUserMessage extracts the current inbound user message from ctx, or "" if unset.
+func ToolUserMessage(ctx context.Context) string {
+	v, _ := ctx.Value(ctxKeyUserMsg).(string)
 	return v
 }
 

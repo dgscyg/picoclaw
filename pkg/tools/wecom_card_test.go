@@ -346,6 +346,7 @@ func TestBuildWecomCardPayload_ButtonInteractionIgnoresUnusedImageScaffolding(t 
 
 func TestWecomCardTool_Execute_SendsPayloadAndMarksRound(t *testing.T) {
 	tool := NewWecomCardTool()
+	const roundID = "round-wecom-card"
 	var sentChannel, sentChatID, sentContent string
 	tool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
 		sentChannel = channel
@@ -354,7 +355,10 @@ func TestWecomCardTool_Execute_SendsPayloadAndMarksRound(t *testing.T) {
 		return nil
 	})
 
-	ctx := WithToolRoutingContext(context.Background(), "wecom_official", "YangXu", "reply-1")
+	ctx := WithToolRoundID(
+		WithToolRoutingContext(context.Background(), "wecom_official", "YangXu", "reply-1"),
+		roundID,
+	)
 	result := tool.Execute(ctx, map[string]any{
 		"card_type": "text_notice",
 		"main_title": map[string]any{
@@ -372,7 +376,7 @@ func TestWecomCardTool_Execute_SendsPayloadAndMarksRound(t *testing.T) {
 	if sentChannel != "wecom_official" || sentChatID != "YangXu" {
 		t.Fatalf("sent target = %s:%s", sentChannel, sentChatID)
 	}
-	if !tool.HasSentInRound() {
+	if !tool.HasSentInRound(roundID) {
 		t.Fatal("expected wecom_card to mark the round as sent")
 	}
 

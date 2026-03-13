@@ -36,7 +36,7 @@ func (t *MemoryRecallTool) Name() string {
 }
 
 func (t *MemoryRecallTool) Description() string {
-	return "Recall relevant memories from the agent's long-term memory"
+	return "Recall relevant memories from the agent's long-term memory. Use this before acting on remembered identifiers such as contact chat_id mappings, user aliases, device IDs, or other stored routing facts."
 }
 
 func (t *MemoryRecallTool) Parameters() map[string]any {
@@ -45,7 +45,7 @@ func (t *MemoryRecallTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"query": map[string]any{
 				"type":        "string",
-				"description": "The search query to find relevant memories",
+				"description": "The search query to find relevant memories. For example, use a person's name to recall a stored chat_id/contact mapping before sending them a message.",
 			},
 			"limit": map[string]any{
 				"type":        "integer",

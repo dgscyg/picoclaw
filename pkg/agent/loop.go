@@ -52,6 +52,7 @@ type AgentLoop struct {
 
 // processOptions configures how a message is processed
 type processOptions struct {
+	RoundID              string   // Per-processing-round identifier for tool send tracking
 	SessionKey           string   // Session identifier for history/context
 	Channel              string   // Target channel for tool execution
 	ChatID               string   // Target chat ID for tool execution
@@ -76,6 +77,12 @@ const (
 	metadataKeyParentPeerKind = "parent_peer_kind"
 	metadataKeyParentPeerID   = "parent_peer_id"
 )
+
+var toolRoundCounter atomic.Uint64
+
+func newToolRoundID() string {
+	return fmt.Sprintf("round-%d-%d", time.Now().UnixNano(), toolRoundCounter.Add(1))
+}
 
 func NewAgentLoop(
 	cfg *config.Config,
@@ -420,7 +427,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				// 	}
 				// }()
 
-				response, err := al.processMessage(ctx, msg)
+				response, roundID, err := al.processMessageDetailed(ctx, msg)
 				if err != nil {
 					response = fmt.Sprintf("Error processing message: %v", err)
 				}
@@ -432,19 +439,13 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					alreadySent := false
 					defaultAgent := al.registry.GetDefaultAgent()
 					if defaultAgent != nil {
-						alreadySent = didAnyRoundSendTrackerSend(defaultAgent, "message")
+						alreadySent = didAnyRoundSendTrackerSend(defaultAgent, roundID, "message")
 						if inboundMetadata(msg, "event_type") == "template_card_event" {
-							alreadySent = alreadySent || didAnyRoundSendTrackerSend(defaultAgent, "wecom_card")
+							alreadySent = alreadySent || didAnyRoundSendTrackerSend(defaultAgent, roundID, "wecom_card")
 						}
 					}
 
-					if inboundMetadata(msg, "event_type") == "template_card_event" {
-						logger.DebugCF(
-							"agent",
-							"Skipped outbound for template_card_event direct answer",
-							map[string]any{"channel": msg.Channel},
-						)
-					} else if !alreadySent {
+					if !alreadySent {
 						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
 							Channel: msg.Channel,
 							ChatID:  msg.ChatID,
@@ -460,8 +461,11 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					} else {
 						logger.DebugCF(
 							"agent",
-							"Skipped outbound (message tool already sent)",
-							map[string]any{"channel": msg.Channel},
+							"Skipped outbound (message already sent in this round)",
+							map[string]any{
+								"channel":    msg.Channel,
+								"event_type": inboundMetadata(msg, "event_type"),
+							},
 						)
 					}
 				}
@@ -639,6 +643,7 @@ func (al *AgentLoop) ProcessHeartbeat(
 		return "", fmt.Errorf("no default agent for heartbeat")
 	}
 	return al.runAgentLoop(ctx, agent, processOptions{
+		RoundID:         newToolRoundID(),
 		SessionKey:      "heartbeat",
 		Channel:         channel,
 		ChatID:          chatID,
@@ -652,6 +657,11 @@ func (al *AgentLoop) ProcessHeartbeat(
 }
 
 func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
+	response, _, err := al.processMessageDetailed(ctx, msg)
+	return response, err
+}
+
+func (al *AgentLoop) processMessageDetailed(ctx context.Context, msg bus.InboundMessage) (string, string, error) {
 	// Add message preview to log (show full content for error messages)
 	var logContent string
 	if strings.Contains(msg.Content, "Error:") || strings.Contains(msg.Content, "error") {
@@ -674,7 +684,8 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 
 	// Route system messages to processSystemMessage
 	if msg.Channel == "system" {
-		return al.processSystemMessage(ctx, msg)
+		response, err := al.processSystemMessage(ctx, msg)
+		return response, "", err
 	}
 
 	route, agent, routeErr := al.resolveMessageRoute(msg)
@@ -684,16 +695,20 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	// context-dependent commands check their own Runtime fields and report
 	// "unavailable" when the required capability is nil.
 	if response, handled := al.handleCommand(ctx, msg, agent); handled {
-		return response, nil
+		return response, "", nil
 	}
 
 	if routeErr != nil {
-		return "", routeErr
+		return "", "", routeErr
 	}
 
-	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
-	resetRoundSendTracker(agent, "message")
-	resetRoundSendTracker(agent, "wecom_card")
+	roundID := newToolRoundID()
+	// Ensure any stale state keyed by the same round identifier is cleared, then
+	// clean it up again after processing completes.
+	resetRoundSendTracker(agent, "message", roundID)
+	resetRoundSendTracker(agent, "wecom_card", roundID)
+	defer resetRoundSendTracker(agent, "message", roundID)
+	defer resetRoundSendTracker(agent, "wecom_card", roundID)
 
 	// Resolve session key from route, while preserving explicit agent-scoped keys.
 	scopeKey := resolveScopeKey(route, msg.SessionKey)
@@ -709,7 +724,8 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 			"route_channel": route.Channel,
 		})
 
-	return al.runAgentLoop(ctx, agent, processOptions{
+	response, err := al.runAgentLoop(ctx, agent, processOptions{
+		RoundID:              roundID,
 		SessionKey:           sessionKey,
 		Channel:              msg.Channel,
 		ChatID:               msg.ChatID,
@@ -722,6 +738,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		EnableSummary:        true,
 		SendResponse:         false,
 	})
+	return response, roundID, err
 }
 
 func userMessageForInbound(msg bus.InboundMessage) string {
@@ -826,11 +843,11 @@ func resolveScopeKey(route routing.ResolvedRoute, msgSessionKey string) string {
 }
 
 type roundSendTracker interface {
-	ResetSentInRound()
-	HasSentInRound() bool
+	ResetSentInRound(roundID string)
+	HasSentInRound(roundID string) bool
 }
 
-func resetRoundSendTracker(agent *AgentInstance, toolName string) {
+func resetRoundSendTracker(agent *AgentInstance, toolName, roundID string) {
 	if agent == nil {
 		return
 	}
@@ -842,10 +859,10 @@ func resetRoundSendTracker(agent *AgentInstance, toolName string) {
 	if !ok {
 		return
 	}
-	tracker.ResetSentInRound()
+	tracker.ResetSentInRound(roundID)
 }
 
-func didAnyRoundSendTrackerSend(agent *AgentInstance, toolNames ...string) bool {
+func didAnyRoundSendTrackerSend(agent *AgentInstance, roundID string, toolNames ...string) bool {
 	if agent == nil {
 		return false
 	}
@@ -855,7 +872,7 @@ func didAnyRoundSendTrackerSend(agent *AgentInstance, toolNames ...string) bool 
 			continue
 		}
 		tracker, ok := tool.(roundSendTracker)
-		if ok && tracker.HasSentInRound() {
+		if ok && tracker.HasSentInRound(roundID) {
 			return true
 		}
 	}
@@ -956,6 +973,7 @@ func (al *AgentLoop) processSystemMessage(
 	sessionKey := routing.BuildAgentMainSessionKey(agent.ID)
 
 	return al.runAgentLoop(ctx, agent, processOptions{
+		RoundID:         newToolRoundID(),
 		SessionKey:      sessionKey,
 		Channel:         originChannel,
 		ChatID:          originChatID,
@@ -973,6 +991,10 @@ func (al *AgentLoop) runAgentLoop(
 	agent *AgentInstance,
 	opts processOptions,
 ) (string, error) {
+	if strings.TrimSpace(opts.RoundID) == "" {
+		opts.RoundID = newToolRoundID()
+	}
+
 	// 0. Record last channel for heartbeat notifications (skip internal channels and cli)
 	if opts.Channel != "" && opts.ChatID != "" {
 		if !constants.IsInternalChannel(opts.Channel) {
@@ -1038,7 +1060,7 @@ func (al *AgentLoop) runAgentLoop(
 
 	// If last tool had ForUser content and we already sent it, we might not need to send final response
 	// This is controlled by the tool's Silent flag and ForUser content
-	if opts.SuppressPostCardText && didAnyRoundSendTrackerSend(agent, "message") {
+	if opts.SuppressPostCardText && didAnyRoundSendTrackerSend(agent, opts.RoundID, "message") {
 		logger.DebugCF("agent", "Suppressing final assistant text after template-card event follow-up message",
 			map[string]any{
 				"agent_id":    agent.ID,
@@ -1047,7 +1069,7 @@ func (al *AgentLoop) runAgentLoop(
 			})
 		return "", nil
 	}
-	if opts.SuppressPostCardText && didAnyRoundSendTrackerSend(agent, "wecom_card") && shouldSuppressPostCardResponse(finalContent) {
+	if opts.SuppressPostCardText && didAnyRoundSendTrackerSend(agent, opts.RoundID, "wecom_card") && shouldSuppressPostCardResponse(finalContent) {
 		logger.DebugCF("agent", "Suppressing post-card assistant text after direct tool delivery",
 			map[string]any{
 				"agent_id":    agent.ID,
@@ -1056,7 +1078,7 @@ func (al *AgentLoop) runAgentLoop(
 			})
 		return "", nil
 	}
-	if didAnyRoundSendTrackerSend(agent, "message") && shouldSuppressPostSendAck(finalContent) {
+	if didAnyRoundSendTrackerSend(agent, opts.RoundID, "message") && shouldSuppressPostSendAck(finalContent) {
 		logger.DebugCF("agent", "Suppressing post-send acknowledgement after direct tool delivery",
 			map[string]any{
 				"agent_id":    agent.ID,
@@ -1065,7 +1087,7 @@ func (al *AgentLoop) runAgentLoop(
 			})
 		return "", nil
 	}
-	if strings.HasPrefix(opts.SessionKey, sessionKeyCronPrefix) && didAnyRoundSendTrackerSend(agent, "message") {
+	if strings.HasPrefix(opts.SessionKey, sessionKeyCronPrefix) && didAnyRoundSendTrackerSend(agent, opts.RoundID, "message") {
 		logger.DebugCF("agent", "Suppressing final assistant text after cron direct delivery",
 			map[string]any{
 				"agent_id":    agent.ID,
@@ -1492,8 +1514,12 @@ func (al *AgentLoop) runLLMIteration(
 				})
 			}
 
+			toolCtx := tools.WithToolUserMessage(
+				tools.WithToolRoundID(ctx, opts.RoundID),
+				opts.UserMessage,
+			)
 			agentResults[idx].result = agent.Tools.ExecuteWithContext(
-				ctx,
+				toolCtx,
 				tc.Name,
 				tc.Arguments,
 				opts.Channel,

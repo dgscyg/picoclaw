@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
@@ -14,7 +14,7 @@ type WecomCardSendCallback func(ctx context.Context, channel, chatID, content st
 
 type WecomCardTool struct {
 	sendCallback WecomCardSendCallback
-	sentInRound  atomic.Bool
+	sentInRound  sync.Map // map[roundID]struct{}
 	defaultTitle string
 }
 
@@ -32,12 +32,19 @@ func (t *WecomCardTool) SetDefaultTitle(title string) {
 	t.defaultTitle = strings.TrimSpace(title)
 }
 
-func (t *WecomCardTool) ResetSentInRound() {
-	t.sentInRound.Store(false)
+func (t *WecomCardTool) ResetSentInRound(roundID string) {
+	if strings.TrimSpace(roundID) == "" {
+		return
+	}
+	t.sentInRound.Delete(roundID)
 }
 
-func (t *WecomCardTool) HasSentInRound() bool {
-	return t.sentInRound.Load()
+func (t *WecomCardTool) HasSentInRound(roundID string) bool {
+	if strings.TrimSpace(roundID) == "" {
+		return false
+	}
+	_, ok := t.sentInRound.Load(roundID)
+	return ok
 }
 
 func (t *WecomCardTool) Name() string { return "wecom_card" }
@@ -285,7 +292,9 @@ func (t *WecomCardTool) Execute(ctx context.Context, args map[string]any) *ToolR
 		return ErrorResult(fmt.Sprintf("sending wecom card: %v", err)).WithError(err)
 	}
 
-	t.sentInRound.Store(true)
+	if roundID := ToolRoundID(ctx); strings.TrimSpace(roundID) != "" {
+		t.sentInRound.Store(roundID, struct{}{})
+	}
 	return SilentResult(fmt.Sprintf("Generated and sent WeCom template_card JSON: %s", string(raw)))
 }
 
