@@ -1456,6 +1456,7 @@ func TestWeComOfficialTemplateCardEventPublishesInboundAndUpdatesCard(t *testing
 	server := newWeComOfficialTestServer(t, func(conn *websocket.Conn) {
 		body, err := json.Marshal(map[string]any{
 			"msgid":        "event-card-1",
+			"create_time":  1700000000,
 			"aibotid":      "bot-id",
 			"chattype":     "single",
 			"chatid":       "user-card-event-1",
@@ -1466,8 +1467,11 @@ func TestWeComOfficialTemplateCardEventPublishesInboundAndUpdatesCard(t *testing
 			"msgtype": "event",
 			"event": map[string]any{
 				"eventtype": "template_card_event",
-				"event_key": "turn_on_ac",
-				"task_id":   "task-card-event-1",
+				"template_card_event": map[string]any{
+					"card_type": "button_interaction",
+					"event_key": "turn_on_ac",
+					"task_id":   "task-card-event-1",
+				},
 			},
 		})
 		if err != nil {
@@ -1565,6 +1569,9 @@ func TestWeComOfficialTemplateCardEventPublishesInboundAndUpdatesCard(t *testing
 	}
 	if got, want := inbound.Metadata["event_type"], "template_card_event"; got != want {
 		t.Fatalf("Metadata[event_type] = %q, want %q", got, want)
+	}
+	if got, want := inbound.Metadata["card_type"], "button_interaction"; got != want {
+		t.Fatalf("Metadata[card_type] = %q, want %q", got, want)
 	}
 	if got, want := inbound.Metadata["event_key"], "turn_on_ac"; got != want {
 		t.Fatalf("Metadata[event_key] = %q, want %q", got, want)

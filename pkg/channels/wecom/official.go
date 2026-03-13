@@ -162,11 +162,46 @@ type wecomOfficialMessage struct {
 			AESKey string `json:"aeskey,omitempty"`
 		} `json:"file,omitempty"`
 	} `json:"quote,omitempty"`
-	Event *struct {
-		EventType string `json:"eventtype"`
-		EventKey  string `json:"event_key,omitempty"`
-		TaskID    string `json:"task_id,omitempty"`
+	CreateTime int64 `json:"create_time,omitempty"`
+	Event      *struct {
+		EventType         string                          `json:"eventtype"`
+		EventKey          string                          `json:"event_key,omitempty"` // legacy flat fallback
+		TaskID            string                          `json:"task_id,omitempty"`   // legacy flat fallback
+		CardType          string                          `json:"card_type,omitempty"` // legacy flat fallback
+		TemplateCardEvent *wecomOfficialTemplateCardEvent `json:"template_card_event,omitempty"`
 	} `json:"event,omitempty"`
+}
+
+type wecomOfficialTemplateCardEvent struct {
+	CardType      string                                  `json:"card_type,omitempty"`
+	EventKey      string                                  `json:"event_key,omitempty"`
+	TaskID        string                                  `json:"task_id,omitempty"`
+	SelectedItems *wecomOfficialTemplateCardSelectedItems `json:"selected_items,omitempty"`
+}
+
+type wecomOfficialTemplateCardSelectedItems struct {
+	SelectedItem []wecomOfficialTemplateCardSelectedItem `json:"selected_item,omitempty"`
+}
+
+type wecomOfficialTemplateCardSelectedItem struct {
+	QuestionKey string `json:"question_key,omitempty"`
+	OptionIDs   *struct {
+		OptionID []string `json:"option_id,omitempty"`
+	} `json:"option_ids,omitempty"`
+}
+
+func (m wecomOfficialMessage) templateCardEvent() *wecomOfficialTemplateCardEvent {
+	if m.Event == nil || strings.TrimSpace(m.Event.EventType) != "template_card_event" {
+		return nil
+	}
+	if m.Event.TemplateCardEvent != nil {
+		return m.Event.TemplateCardEvent
+	}
+	return &wecomOfficialTemplateCardEvent{
+		CardType: m.Event.CardType,
+		EventKey: m.Event.EventKey,
+		TaskID:   m.Event.TaskID,
+	}
 }
 
 type wecomOfficialMediaSource struct {
@@ -728,7 +763,8 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 	chatID string,
 	msg wecomOfficialMessage,
 ) {
-	if msg.Event == nil {
+	event := msg.templateCardEvent()
+	if event == nil {
 		return
 	}
 
@@ -740,9 +776,11 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 		chatID = userID
 	}
 
-	eventKey := strings.TrimSpace(msg.Event.EventKey)
-	taskID := strings.TrimSpace(msg.Event.TaskID)
+	cardType := strings.TrimSpace(event.CardType)
+	eventKey := strings.TrimSpace(event.EventKey)
+	taskID := strings.TrimSpace(event.TaskID)
 	actionText, cardContext := c.describeTemplateCardEvent(taskID, eventKey)
+	selectedItemsText, selectedItemsJSON := c.describeTemplateCardSelectedItems(taskID, event.SelectedItems)
 	if actionText == "" {
 		actionText = humanizeTemplateCardEventKey(eventKey)
 	}
@@ -771,7 +809,7 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 		msg.ResponseURL,
 		msg.ChatType,
 	)
-	content := buildTemplateCardEventUserContent(actionText, eventKey, cardContext)
+	content := buildTemplateCardEventUserContent(actionText, eventKey, cardContext, selectedItemsText)
 
 	peer := bus.Peer{Kind: "direct", ID: chatID}
 	if msg.ChatType == "group" {
@@ -779,13 +817,17 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 	}
 
 	metadata := map[string]string{
-		"msg_type":   msg.MsgType,
-		"chat_type":  msg.ChatType,
-		"msgid":      msg.MsgID,
-		"aibotid":    msg.AIBotID,
-		"req_id":     frame.Headers.ReqID,
-		"reply_to":   frame.Headers.ReqID,
-		"event_type": msg.Event.EventType,
+		"msg_type":    msg.MsgType,
+		"chat_type":   msg.ChatType,
+		"msgid":       msg.MsgID,
+		"aibotid":     msg.AIBotID,
+		"create_time": fmt.Sprintf("%d", msg.CreateTime),
+		"req_id":      frame.Headers.ReqID,
+		"reply_to":    frame.Headers.ReqID,
+		"event_type":  msg.Event.EventType,
+	}
+	if cardType != "" {
+		metadata["card_type"] = cardType
 	}
 	if eventKey != "" {
 		metadata["event_key"] = eventKey
@@ -798,6 +840,12 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 	}
 	if cardContext != "" {
 		metadata["card_context"] = cardContext
+	}
+	if selectedItemsText != "" {
+		metadata["selected_items_text"] = selectedItemsText
+	}
+	if selectedItemsJSON != "" {
+		metadata["selected_items_json"] = selectedItemsJSON
 	}
 	if autoUpdated {
 		metadata["card_auto_updated"] = "true"
@@ -815,6 +863,7 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 	logger.DebugCF("wecom_official", "Received template card event", map[string]any{
 		"chat_id":     chatID,
 		"sender_id":   userID,
+		"card_type":   cardType,
 		"event_key":   eventKey,
 		"task_id":     taskID,
 		"callback_id": frame.Headers.ReqID,
@@ -822,8 +871,8 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 	c.HandleMessage(c.ctx, peer, msg.MsgID, userID, chatID, content, nil, metadata, sender)
 }
 
-func buildTemplateCardEventUserContent(actionText, eventKey, cardContext string) string {
-	parts := make([]string, 0, 2)
+func buildTemplateCardEventUserContent(actionText, eventKey, cardContext, selectedItemsText string) string {
+	parts := make([]string, 0, 3)
 	switch {
 	case strings.TrimSpace(actionText) != "":
 		parts = append(parts, fmt.Sprintf("User clicked template card action: %s.", strings.TrimSpace(actionText)))
@@ -831,6 +880,9 @@ func buildTemplateCardEventUserContent(actionText, eventKey, cardContext string)
 		parts = append(parts, fmt.Sprintf("User clicked template card action key: %s.", strings.TrimSpace(eventKey)))
 	default:
 		parts = append(parts, "User clicked a template card action.")
+	}
+	if strings.TrimSpace(selectedItemsText) != "" {
+		parts = append(parts, fmt.Sprintf("Selected items: %s.", strings.TrimSpace(selectedItemsText)))
 	}
 	if strings.TrimSpace(cardContext) != "" {
 		parts = append(parts, fmt.Sprintf("Card context: %s.", strings.TrimSpace(cardContext)))
@@ -968,6 +1020,122 @@ func humanizeTemplateCardEventKey(eventKey string) string {
 	eventKey = strings.ReplaceAll(eventKey, "_", " ")
 	eventKey = strings.ReplaceAll(eventKey, "-", " ")
 	return strings.TrimSpace(eventKey)
+}
+
+func (c *WeComOfficialChannel) describeTemplateCardSelectedItems(
+	taskID string,
+	selectedItems *wecomOfficialTemplateCardSelectedItems,
+) (string, string) {
+	if selectedItems == nil || len(selectedItems.SelectedItem) == 0 {
+		return "", ""
+	}
+
+	raw, err := json.Marshal(selectedItems.SelectedItem)
+	if err != nil {
+		raw = nil
+	}
+
+	card := c.cardState(taskID)
+	parts := make([]string, 0, len(selectedItems.SelectedItem))
+	for _, item := range selectedItems.SelectedItem {
+		questionKey := strings.TrimSpace(item.QuestionKey)
+		optionIDs := make([]string, 0)
+		if item.OptionIDs != nil {
+			optionIDs = append(optionIDs, item.OptionIDs.OptionID...)
+		}
+		questionTitle, optionTexts := lookupTemplateCardSelectionText(card, questionKey, optionIDs)
+		label := questionKey
+		if strings.TrimSpace(questionTitle) != "" {
+			label = strings.TrimSpace(questionTitle)
+		}
+		displayOptions := optionIDs
+		if len(optionTexts) > 0 {
+			displayOptions = optionTexts
+		}
+		switch {
+		case label != "" && len(displayOptions) > 0:
+			parts = append(parts, fmt.Sprintf("%s=%s", label, strings.Join(displayOptions, ",")))
+		case label != "":
+			parts = append(parts, label)
+		case len(displayOptions) > 0:
+			parts = append(parts, strings.Join(displayOptions, ","))
+		}
+	}
+
+	return strings.Join(parts, "; "), string(raw)
+}
+
+func lookupTemplateCardSelectionText(card map[string]any, questionKey string, optionIDs []string) (string, []string) {
+	if card == nil {
+		return "", nil
+	}
+	findOptionTexts := func(optionList []any, wanted []string) []string {
+		if len(wanted) == 0 {
+			return nil
+		}
+		result := make([]string, 0, len(wanted))
+		seen := make(map[string]struct{}, len(wanted))
+		for _, raw := range optionList {
+			option, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := option["id"].(string)
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			for _, wantedID := range wanted {
+				if strings.TrimSpace(wantedID) != id {
+					continue
+				}
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				text, _ := option["text"].(string)
+				text = strings.TrimSpace(text)
+				if text == "" {
+					text = id
+				}
+				result = append(result, text)
+				seen[id] = struct{}{}
+			}
+		}
+		return result
+	}
+
+	matchQuestion := func(section map[string]any) (string, []string, bool) {
+		key, _ := section["question_key"].(string)
+		if strings.TrimSpace(key) != strings.TrimSpace(questionKey) {
+			return "", nil, false
+		}
+		title, _ := section["title"].(string)
+		optionList, _ := section["option_list"].([]any)
+		return strings.TrimSpace(title), findOptionTexts(optionList, optionIDs), true
+	}
+
+	if buttonSelection, ok := card["button_selection"].(map[string]any); ok {
+		if title, optionTexts, ok := matchQuestion(buttonSelection); ok {
+			return title, optionTexts
+		}
+	}
+	if checkbox, ok := card["checkbox"].(map[string]any); ok {
+		if title, optionTexts, ok := matchQuestion(checkbox); ok {
+			return title, optionTexts
+		}
+	}
+	if selectList, ok := card["select_list"].([]any); ok {
+		for _, raw := range selectList {
+			section, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if title, optionTexts, ok := matchQuestion(section); ok {
+				return title, optionTexts
+			}
+		}
+	}
+	return "", nil
 }
 
 func parseWeComOfficialMessage(msg wecomOfficialMessage) (string, []wecomOfficialMediaSource, string) {
