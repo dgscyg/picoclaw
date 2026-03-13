@@ -73,9 +73,9 @@ PicoClaw includes 15+ built-in tools covering filesystem operations, shell execu
 
 ### wecom_card
 - **Source:** `pkg/tools/wecom_card.go`
-- **Parameters:** Structured enterprise WeCom `template_card` payload fields, including `card_type`, `main_title`, `card_action`, interaction lists, and optional `send`
+- **Parameters:** Structured enterprise WeCom `template_card` payload fields, including `card_type`, `main_title`, `card_action`, interaction lists, optional `send`, and optional target override via `channel` / `chat_id`
 - **Returns:** Silent result when the card is sent directly to `wecom_official`
-- **Context:** Uses `ToolChannel/ToolChatID/ToolReplyTo` from context so callback-scoped sends become official `template_card` replies or `aibot_respond_update_msg` card updates
+- **Context:** Uses `ToolChannel/ToolChatID/ToolReplyTo` from context by default, but an explicit `chat_id` overrides the current conversation target for proactive card delivery. Cross-target sends clear `reply_to` so a card addressed to another user/group does not accidentally reuse the current callback reply chain. Callback-scoped sends in the current chat still become official `template_card` replies or `aibot_respond_update_msg` card updates.
 - **Defaults:** Applies `channels.wecom_official.card.title` as the default branding title when the generated card still contains placeholder `PicoClaw` branding or empty `source.desc`
 
 ### send_file

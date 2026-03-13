@@ -56,6 +56,8 @@ func (t *WecomCardTool) Description() string {
 func (t *WecomCardTool) Parameters() map[string]any {
 	return objectSchema(
 		map[string]any{
+			"channel": stringSchema("Optional target channel. Defaults to the current conversation channel. `wecom_card` only supports `wecom_official`."),
+			"chat_id": stringSchema("Optional target chat/user ID. Defaults to the current conversation chat. If you want to send the card to another user or group, provide the exact target chat_id explicitly."),
 			"card_type": enumStringSchema(
 				"Official template card type to generate. If the current trigger is a `template_card_event`, prefer updating the existing interactive card instead of sending a separate plain message. If the user explicitly asks for an image or picture card, prefer `news_notice`. If the user did not explicitly request a link or mini-program jump, do not choose `text_notice` or `news_notice`; prefer `button_interaction`, `vote_interaction`, or `multiple_interaction` instead. For vague requests like 'send a card', default to the safest non-jump interaction card.",
 				"text_notice",
@@ -275,8 +277,16 @@ func (t *WecomCardTool) Execute(ctx context.Context, args map[string]any) *ToolR
 		return SilentResult(fmt.Sprintf("Generated WeCom template_card JSON: %s", string(raw)))
 	}
 
-	channel := ToolChannel(ctx)
-	chatID := ToolChatID(ctx)
+	currentChannel := ToolChannel(ctx)
+	currentChatID := ToolChatID(ctx)
+	channel, _ := args["channel"].(string)
+	chatID, _ := args["chat_id"].(string)
+	if strings.TrimSpace(channel) == "" {
+		channel = currentChannel
+	}
+	if strings.TrimSpace(chatID) == "" {
+		chatID = currentChatID
+	}
 	if channel != "wecom_official" {
 		return ErrorResult("wecom_card can only send on the wecom_official channel")
 	}
@@ -287,13 +297,20 @@ func (t *WecomCardTool) Execute(ctx context.Context, args map[string]any) *ToolR
 		return ErrorResult("wecom_card sending not configured")
 	}
 
-	sendCtx := WithToolRoutingContext(ctx, channel, chatID, ToolReplyTo(ctx))
+	sameConversationTarget := channel == currentChannel && chatID == currentChatID
+	replyTo := ToolReplyTo(ctx)
+	if !sameConversationTarget {
+		replyTo = ""
+	}
+	sendCtx := WithToolRoutingContext(ctx, channel, chatID, replyTo)
 	if err := t.sendCallback(sendCtx, channel, chatID, string(raw)); err != nil {
 		return ErrorResult(fmt.Sprintf("sending wecom card: %v", err)).WithError(err)
 	}
 
-	if roundID := ToolRoundID(ctx); strings.TrimSpace(roundID) != "" {
-		t.sentInRound.Store(roundID, struct{}{})
+	if sameConversationTarget {
+		if roundID := ToolRoundID(ctx); strings.TrimSpace(roundID) != "" {
+			t.sentInRound.Store(roundID, struct{}{})
+		}
 	}
 	return SilentResult(fmt.Sprintf("Generated and sent WeCom template_card JSON: %s", string(raw)))
 }

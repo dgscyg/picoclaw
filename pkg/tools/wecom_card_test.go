@@ -388,3 +388,58 @@ func TestWecomCardTool_Execute_SendsPayloadAndMarksRound(t *testing.T) {
 		t.Fatalf("msgtype = %v", got)
 	}
 }
+
+func TestWecomCardTool_Execute_CrossTargetSendUsesExplicitChatID(t *testing.T) {
+	tool := NewWecomCardTool()
+	const roundID = "round-wecom-card-cross-target"
+
+	var sentChannel, sentChatID, sentReplyTo string
+	tool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
+		sentChannel = channel
+		sentChatID = chatID
+		sentReplyTo = ToolReplyTo(ctx)
+		return nil
+	})
+
+	ctx := WithToolRoundID(
+		WithToolRoutingContext(context.Background(), "wecom_official", "dragonsss", "reply-1"),
+		roundID,
+	)
+	result := tool.Execute(ctx, map[string]any{
+		"chat_id":   "WangCheng",
+		"card_type": "button_interaction",
+		"main_title": map[string]any{
+			"title": "会议室空调控制",
+			"desc":  "设备: 6872176FF500",
+		},
+		"sub_title_text": "当前状态: ⭕ 关机 | 模式: 制冷 | 温度: 20°C | 风速: 自动",
+		"task_id":        "ac_control_6872176FF500",
+		"button_list": []any{
+			map[string]any{
+				"text":  "关闭空调",
+				"key":   "ac_power_off_6872176FF500",
+				"style": 4,
+			},
+			map[string]any{
+				"text":  "开启空调",
+				"key":   "ac_power_on_6872176FF500",
+				"style": 2,
+			},
+		},
+	})
+	if !result.Silent || result.IsError {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if got, want := sentChannel, "wecom_official"; got != want {
+		t.Fatalf("sent channel = %q, want %q", got, want)
+	}
+	if got, want := sentChatID, "WangCheng"; got != want {
+		t.Fatalf("sent chatID = %q, want %q", got, want)
+	}
+	if got := sentReplyTo; got != "" {
+		t.Fatalf("cross-target replyTo = %q, want empty", got)
+	}
+	if tool.HasSentInRound(roundID) {
+		t.Fatal("cross-target send should not mark the current round as already replied")
+	}
+}
