@@ -29,8 +29,8 @@
 
 ### Cron Tool Actions
 
-- **1. Add Job:** `pkg/tools/cron.go:214-320` - `addJob` creates CronSchedule from at_seconds/every_seconds/cron_expr, rejects MCP-like shell misuse in `command`, and deduplicates equivalent jobs by schedule + payload + target before calling CronService.AddJob.
-- **2. Execute Job:** `pkg/tools/cron.go:358-390` - `ExecuteJob` routes to: (a) ExecTool for shell commands, (b) MessageBus for direct delivery, or (c) AgentLoop.ProcessDirectWithChannel for agent processing with a dedicated `cron-<jobID>` session key.
+- **1. Add Job:** `pkg/tools/cron.go` - `addJob` creates CronSchedule from at_seconds/every_seconds/cron_expr, rejects MCP-like shell misuse in `command`, deduplicates equivalent jobs by schedule + payload + target, and forcibly downgrades `deliver=true` to `deliver=false` when the scheduled message reads like an agent task (query/report/device/tool execution) rather than a fixed reminder string.
+- **2. Execute Job:** `pkg/tools/cron.go` - `ExecuteJob` routes to: (a) ExecTool for shell commands, (b) MessageBus for literal direct delivery, or (c) AgentLoop.ProcessDirectWithChannel for agent processing with a dedicated `cron-<jobID>` session key. If the scheduled agent turn returns a direct final answer instead of calling `message`, `ExecuteJob` now publishes that answer itself to the target channel.
 
 ### Heartbeat Lifecycle
 
@@ -68,4 +68,4 @@
 - CronService.SetOnJob callback wired to CronTool.ExecuteJob (`helpers.go:248-251`).
 - HeartbeatHandler callback wired to AgentLoop.ProcessHeartbeat.
 - Both services share MessageBus for outbound message delivery.
-- `agent_turn` cron jobs should notify users through explicit tools such as `message`; after a direct tool send, cron-scoped sessions suppress trailing LLM narration so scheduled reports do not append unrelated fallback chat text.
+- `agent_turn` cron jobs should notify users through explicit tools such as `message`; after a direct tool send, cron-scoped sessions suppress trailing LLM narration so scheduled reports do not append unrelated fallback chat text. When the agent instead returns a non-empty direct final answer, the cron layer must publish that answer because the direct-processing path itself runs with `SendResponse=false`.

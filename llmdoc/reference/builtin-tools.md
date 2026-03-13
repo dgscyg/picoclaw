@@ -118,7 +118,8 @@ PicoClaw includes 15+ built-in tools covering filesystem operations, shell execu
 - **Formats:** `at_seconds`, `every_seconds`, cron expressions
 - **Returns:** Job ID and schedule confirmation
 - **Deduplication:** Equivalent jobs (same schedule, payload, deliver flag, and target channel/chat) are not recreated; add returns the existing job instead.
-- **Agent Turns:** `deliver=false` jobs execute through `AgentLoop.ProcessDirectWithChannel` using a dedicated `cron-<jobID>` session key so scheduled tasks do not pollute normal chat sessions.
+- **Deliver Semantics:** `deliver=true` means `message` is sent literally as-is to the target channel. It is only correct for fixed reminder text. If the scheduled text implies querying devices, calling tools, summarizing data, or deciding what to send at runtime, PicoClaw forces agent execution semantics instead of literal delivery.
+- **Agent Turns:** `deliver=false` jobs execute through `AgentLoop.ProcessDirectWithChannel` using a dedicated `cron-<jobID>` session key so scheduled tasks do not pollute normal chat sessions. If the scheduled agent turn produces a direct final answer rather than using the `message` tool, the cron layer publishes that answer to the target channel.
 
 ## 10. Hardware Interface Tools
 
