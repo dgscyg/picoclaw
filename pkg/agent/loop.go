@@ -69,6 +69,7 @@ type processOptions struct {
 const (
 	defaultResponse           = "I've completed processing but have no response to give. Increase `max_tool_iterations` in config.json."
 	sessionKeyAgentPrefix     = "agent:"
+	sessionKeyCronPrefix      = "cron-"
 	metadataKeyAccountID      = "account_id"
 	metadataKeyGuildID        = "guild_id"
 	metadataKeyTeamID         = "team_id"
@@ -714,13 +715,31 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		ChatID:               msg.ChatID,
 		ReplyTo:              inboundMetadata(msg, "reply_to"),
 		SuppressPostCardText: inboundMetadata(msg, "event_type") == "template_card_event",
-		UserMessage:          msg.Content,
+		UserMessage:          userMessageForInbound(msg),
 		HistoryUserMessage:   historyUserMessageForInbound(msg),
 		Media:                msg.Media,
 		DefaultResponse:      defaultResponse,
 		EnableSummary:        true,
 		SendResponse:         false,
 	})
+}
+
+func userMessageForInbound(msg bus.InboundMessage) string {
+	if inboundMetadata(msg, "event_type") != "template_card_event" {
+		return msg.Content
+	}
+	actionText := strings.TrimSpace(inboundMetadata(msg, "event_action_text"))
+	eventKey := strings.TrimSpace(inboundMetadata(msg, "event_key"))
+	cardContext := strings.TrimSpace(inboundMetadata(msg, "card_context"))
+	if actionText != "" || eventKey != "" || cardContext != "" {
+		return buildTemplateCardEventUserMessage(actionText, eventKey, cardContext)
+	}
+	if normalized, ok := normalizeTemplateCardEventHistory(msg.Content); ok {
+		if strings.TrimSpace(normalized) != "" {
+			return normalized
+		}
+	}
+	return "User clicked a template card action."
 }
 
 func historyUserMessageForInbound(msg bus.InboundMessage) string {
@@ -736,6 +755,25 @@ func historyUserMessageForInbound(msg bus.InboundMessage) string {
 		return fmt.Sprintf("User clicked template card action key: %s.", eventKey)
 	}
 	return "User clicked a template card action."
+}
+
+func buildTemplateCardEventUserMessage(actionText, eventKey, cardContext string) string {
+	switch {
+	case strings.TrimSpace(actionText) != "":
+		if strings.TrimSpace(cardContext) != "" {
+			return fmt.Sprintf("User clicked template card action: %s. Card context: %s.", strings.TrimSpace(actionText), strings.TrimSpace(cardContext))
+		}
+		return fmt.Sprintf("User clicked template card action: %s.", strings.TrimSpace(actionText))
+	case strings.TrimSpace(eventKey) != "":
+		if strings.TrimSpace(cardContext) != "" {
+			return fmt.Sprintf("User clicked template card action key: %s. Card context: %s.", strings.TrimSpace(eventKey), strings.TrimSpace(cardContext))
+		}
+		return fmt.Sprintf("User clicked template card action key: %s.", strings.TrimSpace(eventKey))
+	case strings.TrimSpace(cardContext) != "":
+		return fmt.Sprintf("User clicked a template card action. Card context: %s.", strings.TrimSpace(cardContext))
+	default:
+		return "User clicked a template card action."
+	}
 }
 
 func toolCallRequiresSequentialExecution(name string) bool {
@@ -781,7 +819,7 @@ func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.Resolv
 }
 
 func resolveScopeKey(route routing.ResolvedRoute, msgSessionKey string) string {
-	if msgSessionKey != "" && strings.HasPrefix(msgSessionKey, sessionKeyAgentPrefix) {
+	if strings.TrimSpace(msgSessionKey) != "" {
 		return msgSessionKey
 	}
 	return route.SessionKey
@@ -1020,6 +1058,15 @@ func (al *AgentLoop) runAgentLoop(
 	}
 	if didAnyRoundSendTrackerSend(agent, "message") && shouldSuppressPostSendAck(finalContent) {
 		logger.DebugCF("agent", "Suppressing post-send acknowledgement after direct tool delivery",
+			map[string]any{
+				"agent_id":    agent.ID,
+				"session_key": opts.SessionKey,
+				"content":     finalContent,
+			})
+		return "", nil
+	}
+	if strings.HasPrefix(opts.SessionKey, sessionKeyCronPrefix) && didAnyRoundSendTrackerSend(agent, "message") {
+		logger.DebugCF("agent", "Suppressing final assistant text after cron direct delivery",
 			map[string]any{
 				"agent_id":    agent.ID,
 				"session_key": opts.SessionKey,

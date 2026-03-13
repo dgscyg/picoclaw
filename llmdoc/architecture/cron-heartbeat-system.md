@@ -21,16 +21,16 @@
 ### Cron Job Lifecycle
 
 - **1. Initialization:** `cmd/picoclaw/internal/gateway/helpers.go:221-255` - `setupCronTool` creates CronService with store path, registers CronTool with AgentLoop, sets JobHandler callback.
-- **2. Persistence:** `pkg/cron/service.go:336-361` - Jobs stored in `workspace/cron/jobs.json` with atomic writes via `fileutil.WriteFileAtomic`.
+- **2. Persistence:** `pkg/cron/service.go:338-362` - Jobs stored in `workspace/cron/jobs.json` with atomic writes via `fileutil.WriteFileAtomic`; Windows-safe replacement is handled in `pkg/fileutil`.
 - **3. Scheduling Loop:** `pkg/cron/service.go:121-133` - `runLoop` uses 1-second ticker, calls `checkJobs()` each tick.
-- **4. Job Detection:** `pkg/cron/service.go:135-175` - `checkJobs` collects due jobs (NextRunAtMS <= now), nullifies NextRunAtMS to prevent re-execution, saves store, executes outside lock.
+- **4. Job Detection:** `pkg/cron/service.go:135-175` - `checkJobs` collects due jobs (NextRunAtMS <= now), nullifies NextRunAtMS to prevent re-execution, saves store only when due jobs exist, then executes outside lock.
 - **5. Job Execution:** `pkg/cron/service.go:177-264` - `executeJobByID` calls JobHandler, updates LastRunAtMS/LastStatus/LastError, computes next run for recurring jobs.
 - **6. Next Run Computation:** `pkg/cron/service.go:266-300` - `computeNextRun` handles three schedule kinds: "at" (one-time), "every" (interval), "cron" (gronx expression parsing).
 
 ### Cron Tool Actions
 
-- **1. Add Job:** `pkg/tools/cron.go:124-209` - `addJob` creates CronSchedule from at_seconds/every_seconds/cron_expr, calls CronService.AddJob.
-- **2. Execute Job:** `pkg/tools/cron.go:268-335` - `ExecuteJob` routes to: (a) ExecTool for shell commands, (b) MessageBus for direct delivery, or (c) AgentLoop.ProcessDirectWithChannel for agent processing.
+- **1. Add Job:** `pkg/tools/cron.go:214-320` - `addJob` creates CronSchedule from at_seconds/every_seconds/cron_expr, rejects MCP-like shell misuse in `command`, and deduplicates equivalent jobs by schedule + payload + target before calling CronService.AddJob.
+- **2. Execute Job:** `pkg/tools/cron.go:358-390` - `ExecuteJob` routes to: (a) ExecTool for shell commands, (b) MessageBus for direct delivery, or (c) AgentLoop.ProcessDirectWithChannel for agent processing with a dedicated `cron-<jobID>` session key.
 
 ### Heartbeat Lifecycle
 
@@ -68,3 +68,4 @@
 - CronService.SetOnJob callback wired to CronTool.ExecuteJob (`helpers.go:248-251`).
 - HeartbeatHandler callback wired to AgentLoop.ProcessHeartbeat.
 - Both services share MessageBus for outbound message delivery.
+- `agent_turn` cron jobs should notify users through explicit tools such as `message`; after a direct tool send, cron-scoped sessions suppress trailing LLM narration so scheduled reports do not append unrelated fallback chat text.

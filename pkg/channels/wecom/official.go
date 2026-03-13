@@ -746,25 +746,6 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 	if actionText == "" {
 		actionText = humanizeTemplateCardEventKey(eventKey)
 	}
-	contentParts := make([]string, 0, 10)
-	if actionText != "" {
-		contentParts = append(contentParts,
-			fmt.Sprintf("User clicked template card action: %s.", actionText),
-			fmt.Sprintf("Equivalent user instruction: %q.", actionText),
-			"Treat this as a confirmed user request and execute the corresponding action now. Do not ask the user which button was clicked again.",
-		)
-	} else {
-		contentParts = append(contentParts, "Template card event triggered.")
-	}
-	if eventKey != "" {
-		contentParts = append(contentParts, fmt.Sprintf("event_key=%s.", eventKey))
-	}
-	if taskID != "" {
-		contentParts = append(contentParts, fmt.Sprintf("task_id=%s.", taskID))
-	}
-	if cardContext != "" {
-		contentParts = append(contentParts, fmt.Sprintf("Card context: %s.", cardContext))
-	}
 	autoUpdated := false
 	if taskID != "" {
 		updateCtx, cancel := context.WithTimeout(c.ctx, wecomOfficialSendTimeout)
@@ -790,12 +771,7 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 		msg.ResponseURL,
 		msg.ChatType,
 	)
-	if autoUpdated {
-		contentParts = append(contentParts, "The card has already been updated to a pending state. Do not call `wecom_card` again for this event. The platform only allows `template_card_event` updates within 5 seconds. If you need to notify the user after processing, use the normal `message` tool in the current reply context so the channel can deliver a follow-up via the official callback response_url.")
-	} else {
-		contentParts = append(contentParts, "Do not call `wecom_card` again for this event. `template_card_event` updates are limited to a 5-second callback window, which the channel has already attempted to use if possible. If you need to tell the user anything else, use the normal `message` tool in the current reply context so the channel can deliver a follow-up via the official callback response_url.")
-	}
-	content := strings.Join(contentParts, " ")
+	content := buildTemplateCardEventUserContent(actionText, eventKey, cardContext)
 
 	peer := bus.Peer{Kind: "direct", ID: chatID}
 	if msg.ChatType == "group" {
@@ -820,6 +796,9 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 	if actionText != "" {
 		metadata["event_action_text"] = actionText
 	}
+	if cardContext != "" {
+		metadata["card_context"] = cardContext
+	}
 	if autoUpdated {
 		metadata["card_auto_updated"] = "true"
 	}
@@ -841,6 +820,22 @@ func (c *WeComOfficialChannel) handleTemplateCardEvent(
 		"callback_id": frame.Headers.ReqID,
 	})
 	c.HandleMessage(c.ctx, peer, msg.MsgID, userID, chatID, content, nil, metadata, sender)
+}
+
+func buildTemplateCardEventUserContent(actionText, eventKey, cardContext string) string {
+	parts := make([]string, 0, 2)
+	switch {
+	case strings.TrimSpace(actionText) != "":
+		parts = append(parts, fmt.Sprintf("User clicked template card action: %s.", strings.TrimSpace(actionText)))
+	case strings.TrimSpace(eventKey) != "":
+		parts = append(parts, fmt.Sprintf("User clicked template card action key: %s.", strings.TrimSpace(eventKey)))
+	default:
+		parts = append(parts, "User clicked a template card action.")
+	}
+	if strings.TrimSpace(cardContext) != "" {
+		parts = append(parts, fmt.Sprintf("Card context: %s.", strings.TrimSpace(cardContext)))
+	}
+	return strings.Join(parts, " ")
 }
 
 func (c *WeComOfficialChannel) describeTemplateCardEvent(taskID, eventKey string) (string, string) {

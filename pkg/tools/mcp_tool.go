@@ -140,10 +140,10 @@ func (t *MCPTool) Execute(ctx context.Context, args map[string]any) *ToolResult 
 		return ErrorResult("MCP tool execution failed: nil result").WithError(nilErr)
 	}
 	if result.IsError {
-		errMsg := extractContentText(result.Content)
+		errMsg := extractToolResultText(result)
 		return ErrorResult(fmt.Sprintf("MCP tool returned error: %s", errMsg)).WithError(fmt.Errorf("MCP tool error: %s", errMsg))
 	}
-	output := extractContentText(result.Content)
+	output := extractToolResultText(result)
 	return &ToolResult{ForLLM: output, IsError: false}
 }
 
@@ -174,4 +174,36 @@ func extractContentText(content []mcp.Content) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+func extractToolResultText(result *mcp.CallToolResult) string {
+	if result == nil {
+		return ""
+	}
+
+	text := strings.TrimSpace(extractContentText(result.Content))
+	if structured := stringifyStructuredContent(result.StructuredContent); structured != "" {
+		if text == "" {
+			return structured
+		}
+		if text == structured {
+			return text
+		}
+		return text + "\n" + structured
+	}
+	return text
+}
+
+func stringifyStructuredContent(v any) string {
+	if v == nil {
+		return ""
+	}
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		data, err = json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+	}
+	return strings.TrimSpace(string(data))
 }

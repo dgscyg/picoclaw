@@ -162,8 +162,10 @@ func (cs *CronService) checkJobs() {
 		}
 	}
 
-	if err := cs.saveStoreUnsafe(); err != nil {
-		log.Printf("[cron] failed to save store: %v", err)
+	if len(dueJobIDs) > 0 {
+		if err := cs.saveStoreUnsafe(); err != nil {
+			log.Printf("[cron] failed to save store: %v", err)
+		}
 	}
 
 	cs.mu.Unlock()

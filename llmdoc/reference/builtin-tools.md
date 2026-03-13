@@ -69,7 +69,7 @@ PicoClaw includes 15+ built-in tools covering filesystem operations, shell execu
 - **Source:** `pkg/tools/message.go:11-103`
 - **Parameters:** `content` (string), `channel` (optional), `chat_id` (optional)
 - **Returns:** Silent result (message sent directly to user)
-- **Context:** Uses `ToolChannel/ToolChatID` from context for routing; on `wecom_official`, `separate_message=true` sends proactive markdown, not template cards
+- **Context:** Uses `ToolChannel/ToolChatID` from context for routing; on `wecom_official`, `separate_message=true` sends proactive markdown, not template cards. In cron-scoped agent turns, `message` is the preferred way to notify users; once it sends, trailing LLM narration is suppressed.
 
 ### wecom_card
 - **Source:** `pkg/tools/wecom_card.go`
@@ -117,6 +117,8 @@ PicoClaw includes 15+ built-in tools covering filesystem operations, shell execu
 - **Parameters:** `schedule` (string), `action` (string), `message`/`command` (string)
 - **Formats:** `at_seconds`, `every_seconds`, cron expressions
 - **Returns:** Job ID and schedule confirmation
+- **Deduplication:** Equivalent jobs (same schedule, payload, deliver flag, and target channel/chat) are not recreated; add returns the existing job instead.
+- **Agent Turns:** `deliver=false` jobs execute through `AgentLoop.ProcessDirectWithChannel` using a dedicated `cron-<jobID>` session key so scheduled tasks do not pollute normal chat sessions.
 
 ## 10. Hardware Interface Tools
 
@@ -137,3 +139,4 @@ PicoClaw includes 15+ built-in tools covering filesystem operations, shell execu
 - **Naming:** Sanitized with hash suffix for collision avoidance
 - **Discovery:** Automatic via `pkg/mcp/manager.go` server connection
 - **Transports:** stdio, SSE/HTTP
+- **Result Handling:** If the MCP server returns structured JSON in `CallToolResult.StructuredContent`, PicoClaw now JSON-stringifies that payload into the tool result so the LLM can still reason over tools that do not populate text `Content`.

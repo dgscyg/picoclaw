@@ -210,6 +210,17 @@ func TestNormalizeTemplateCardEventHistory_LegacyTriggeredMessage(t *testing.T) 
 	}
 }
 
+func TestNormalizeTemplateCardEventHistory_StripsCardContext(t *testing.T) {
+	input := "User clicked template card action: 开启空调. Card context: 设备ID=6872176FF500, 会议室空调状态监控."
+	got, ok := normalizeTemplateCardEventHistory(input)
+	if !ok {
+		t.Fatal("expected template-card-event history to be recognized")
+	}
+	if want := "User clicked template card action: 开启空调."; got != want {
+		t.Fatalf("normalizeTemplateCardEventHistory() = %q, want %q", got, want)
+	}
+}
+
 func roles(msgs []providers.Message) []string {
 	r := make([]string, len(msgs))
 	for i, m := range msgs {

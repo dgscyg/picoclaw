@@ -21,10 +21,10 @@
 - **2. Schema Conversion:** `ToolRegistry.ToProviderDefs()` converts tools to provider-compatible JSON Schema (`pkg/tools/registry.go:147-177`).
 - **3. LLM Call:** Agent loop calls LLM with tool definitions via `providers.LLMProvider.Chat()` (`pkg/tools/toolloop.go:67`).
 - **4. Tool Call Parsing:** Response tool calls normalized via `providers.NormalizeToolCall()` (`pkg/tools/toolloop.go:90`).
-- **5. Parallel Execution:** Each tool call executed in goroutine via `ToolRegistry.ExecuteWithContext()` (`pkg/tools/toolloop.go:134-156`).
+- **5. Parallel Execution:** Most tool calls execute in parallel via `ToolRegistry.ExecuteWithContext()` (`pkg/tools/toolloop.go:134-156`), but side-effect tools such as `message`, `wecom_card`, and `send_file` are forced into sequential execution by the agent loop to preserve ordering and channel reply semantics.
 - **6. Context Injection:** `WithToolRoutingContext()` injects channel/chatID into context for tool routing (`pkg/tools/registry.go:77`).
 - **7. Result Handling:** Tool results appended as tool role messages, loop continues until no tool calls or max iterations (`pkg/tools/toolloop.go:161-173`).
-- **8. MCP Bridge:** External MCP tools wrapped by `MCPTool.Execute()` calling `MCPManager.CallTool()` (`pkg/tools/mcp_tool.go:203-228`).
+- **8. MCP Bridge:** External MCP tools wrapped by `MCPTool.Execute()` calling `MCPManager.CallTool()` (`pkg/tools/mcp_tool.go`). The wrapper now preserves both `Content` text and JSON-marshaled `StructuredContent`, so tools that only return structured payloads still give the LLM usable output.
 
 ## 4. Design Rationale
 

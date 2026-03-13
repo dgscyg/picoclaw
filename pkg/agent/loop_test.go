@@ -605,6 +605,35 @@ func (m *orderedToolCallsProvider) GetDefaultModel() string {
 	return "ordered-tool-calls-mock-model"
 }
 
+type cronMessageThenNarrateProvider struct {
+	calls int
+}
+
+func (m *cronMessageThenNarrateProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	defer func() { m.calls++ }()
+	if m.calls == 0 {
+		return &providers.LLMResponse{
+			ToolCalls: []providers.ToolCall{
+				{ID: "call-1", Type: "function", Name: "message", Arguments: map[string]any{"content": "status report"}},
+			},
+		}, nil
+	}
+	return &providers.LLMResponse{
+		Content:   "看起来你的消息可能没有发送完整，我只看到了一个思考标签。",
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (m *cronMessageThenNarrateProvider) GetDefaultModel() string {
+	return "cron-message-then-narrate-mock-model"
+}
+
 // mockCustomTool is a simple mock tool for registration testing
 type mockCustomTool struct{}
 
@@ -702,6 +731,58 @@ func TestProcessMessage_UsesRouteSessionKey(t *testing.T) {
 	}
 }
 
+func TestProcessMessage_UsesExplicitSessionKey(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &simpleMockProvider{response: "ok"}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	msg := bus.InboundMessage{
+		Channel:    "wecom_official",
+		SenderID:   "cron",
+		ChatID:     "YangXu",
+		Content:    "scheduled status query",
+		SessionKey: "cron-job-42",
+	}
+
+	route := al.registry.ResolveRoute(routing.RouteInput{
+		Channel: msg.Channel,
+		Peer:    extractPeer(msg),
+	})
+
+	helper := testHelper{al: al}
+	_ = helper.executeAndGetResponse(t, context.Background(), msg)
+
+	explicitHistory := al.registry.GetDefaultAgent().Sessions.GetHistory("cron-job-42")
+	if len(explicitHistory) != 2 {
+		t.Fatalf("expected explicit session history len=2, got %d", len(explicitHistory))
+	}
+	if got, want := explicitHistory[0].Content, "scheduled status query"; got != want {
+		t.Fatalf("explicit history first user message = %q, want %q", got, want)
+	}
+
+	routeHistory := al.registry.GetDefaultAgent().Sessions.GetHistory(route.SessionKey)
+	if len(routeHistory) != 0 {
+		t.Fatalf("expected route session %q to remain empty, got %d messages", route.SessionKey, len(routeHistory))
+	}
+}
+
 func TestProcessMessage_TemplateCardEventStoresSanitizedHistory(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -750,6 +831,24 @@ func TestProcessMessage_TemplateCardEventStoresSanitizedHistory(t *testing.T) {
 	}
 	if got, want := history[0].Content, "User clicked template card action: 开启空调."; got != want {
 		t.Fatalf("history[0].Content = %q, want %q", got, want)
+	}
+}
+
+func TestUserMessageForInbound_TemplateCardEventUsesMetadataContext(t *testing.T) {
+	msg := bus.InboundMessage{
+		Content: "Template card event triggered. Do not call `wecom_card` again for this event.",
+		Metadata: map[string]string{
+			"event_type":        "template_card_event",
+			"event_action_text": "开启空调",
+			"event_key":         "turn_on_ac",
+			"card_context":      "设备ID=6872176FF500, 会议室空调状态监控",
+		},
+	}
+
+	got := userMessageForInbound(msg)
+	want := "User clicked template card action: 开启空调. Card context: 设备ID=6872176FF500, 会议室空调状态监控."
+	if got != want {
+		t.Fatalf("userMessageForInbound() = %q, want %q", got, want)
 	}
 }
 
@@ -827,6 +926,78 @@ func TestProcessMessage_MultipleWeComMessageToolCallsStayOrdered(t *testing.T) {
 	}
 	if got := sendChannel.sends[2].ReplyTo; got != "" {
 		t.Fatalf("send[2].ReplyTo = %q, want empty", got)
+	}
+}
+
+func TestProcessDirectWithChannel_CronSuppressesPostMessageNarration(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &cronMessageThenNarrateProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	messageTool := tools.NewMessageTool()
+	messageTool.SetSendCallback(al.sendToolMessage)
+	al.RegisterTool(messageTool)
+
+	chManager, err := channels.NewManager(&config.Config{}, bus.NewMessageBus(), nil)
+	if err != nil {
+		t.Fatalf("Failed to create channel manager: %v", err)
+	}
+	sendChannel := &fakeWeComSendChannel{
+		fakeReplyReuseChannel: fakeReplyReuseChannel{
+			fakeChannel: fakeChannel{id: "rid-wecom-official"},
+			canReuse:    true,
+		},
+	}
+	chManager.RegisterChannel("wecom_official", sendChannel)
+	al.SetChannelManager(chManager)
+
+	response, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"查询空调设备状态并报告",
+		"cron-job-99",
+		"wecom_official",
+		"YangXu",
+	)
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error = %v", err)
+	}
+	if response != "" {
+		t.Fatalf("expected cron follow-up narration to be suppressed, got %q", response)
+	}
+	if len(sendChannel.sends) != 1 {
+		t.Fatalf("expected 1 direct send, got %d", len(sendChannel.sends))
+	}
+	if got, want := sendChannel.sends[0].Content, "status report"; got != want {
+		t.Fatalf("send[0].Content = %q, want %q", got, want)
+	}
+
+	history := al.registry.GetDefaultAgent().Sessions.GetHistory("cron-job-99")
+	if len(history) == 0 {
+		t.Fatal("expected cron session history to exist")
+	}
+	if got, want := history[0].Role, "user"; got != want {
+		t.Fatalf("history[0].Role = %q, want %q", got, want)
+	}
+	for _, entry := range history {
+		if entry.Role == "assistant" && strings.Contains(entry.Content, "思考标签") {
+			t.Fatalf("unexpected cron narration saved in history: %+v", entry)
+		}
 	}
 }
 

@@ -484,6 +484,20 @@ func normalizeTemplateCardEventHistory(content string) (string, bool) {
 		if end := strings.Index(line, " Equivalent user instruction:"); end >= 0 {
 			line = line[:end]
 		}
+		if end := strings.Index(line, " Card context:"); end >= 0 {
+			line = line[:end]
+		}
+		return strings.TrimSpace(line), true
+	}
+
+	if strings.HasPrefix(content, "User clicked template card action key: ") {
+		line := content
+		if end := strings.Index(line, "\n"); end >= 0 {
+			line = line[:end]
+		}
+		if end := strings.Index(line, " Card context:"); end >= 0 {
+			line = line[:end]
+		}
 		return strings.TrimSpace(line), true
 	}
 

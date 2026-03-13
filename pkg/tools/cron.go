@@ -25,6 +25,96 @@ type CronTool struct {
 	execTool    *ExecTool
 }
 
+func scheduledCommandLooksLikeToolInvocation(command string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return false
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+	first := strings.TrimSpace(fields[0])
+	if first == "" {
+		return false
+	}
+	if strings.ContainsAny(first, `/\:.`) {
+		return false
+	}
+	lower := strings.ToLower(first)
+	if strings.HasPrefix(lower, "mcp_") {
+		return true
+	}
+	if strings.HasPrefix(lower, "mcp") && len(fields) > 1 {
+		for _, field := range fields[1:] {
+			if strings.HasPrefix(strings.TrimSpace(field), "-") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func scheduledToolInvocationError(command string) string {
+	command = strings.TrimSpace(command)
+	return fmt.Sprintf(
+		"`cron.command` only supports real shell commands, but %q looks like a PicoClaw/MCP tool invocation. Recreate the job with `deliver=false` and put the natural-language task in `message` so the agent can call tools at runtime, or replace `command` with an actual shell command.",
+		command,
+	)
+}
+
+func cronSchedulesEquivalent(a, b cron.CronSchedule) bool {
+	if a.Kind != b.Kind || a.Expr != b.Expr || a.TZ != b.TZ {
+		return false
+	}
+	switch a.Kind {
+	case "every":
+		if a.EveryMS == nil || b.EveryMS == nil {
+			return a.EveryMS == nil && b.EveryMS == nil
+		}
+		return *a.EveryMS == *b.EveryMS
+	case "cron":
+		return true
+	case "at":
+		if a.AtMS == nil || b.AtMS == nil {
+			return a.AtMS == nil && b.AtMS == nil
+		}
+		diff := *a.AtMS - *b.AtMS
+		if diff < 0 {
+			diff = -diff
+		}
+		return diff <= 5000
+	default:
+		return false
+	}
+}
+
+func findEquivalentCronJob(
+	jobs []cron.CronJob,
+	schedule cron.CronSchedule,
+	message, command string,
+	deliver bool,
+	channel, chatID string,
+) *cron.CronJob {
+	for i := range jobs {
+		job := &jobs[i]
+		if job.Payload.Kind != "agent_turn" {
+			continue
+		}
+		if job.Payload.Message != message || job.Payload.Command != command || job.Payload.Deliver != deliver {
+			continue
+		}
+		if job.Payload.Channel != channel || job.Payload.To != chatID {
+			continue
+		}
+		if !cronSchedulesEquivalent(job.Schedule, schedule) {
+			continue
+		}
+		return job
+	}
+	return nil
+}
+
 // NewCronTool creates a new CronTool
 // execTimeout: 0 means no timeout, >0 sets the timeout duration
 func NewCronTool(
@@ -52,7 +142,7 @@ func (t *CronTool) Name() string {
 
 // Description returns the tool description
 func (t *CronTool) Description() string {
-	return "Schedule reminders, tasks, or system commands. IMPORTANT: When user asks to be reminded or scheduled, you MUST call this tool. Use 'at_seconds' for one-time reminders (e.g., 'remind me in 10 minutes' → at_seconds=600). Use 'every_seconds' ONLY for recurring tasks (e.g., 'every 2 hours' → every_seconds=7200). Use 'cron_expr' for complex recurring schedules. Use 'command' to execute shell commands directly."
+	return "Schedule reminders, tasks, or system commands. IMPORTANT: When user asks to be reminded or scheduled, you MUST call this tool. Use 'at_seconds' for one-time reminders (e.g., 'remind me in 10 minutes' → at_seconds=600). Use 'every_seconds' ONLY for recurring tasks (e.g., 'every 2 hours' → every_seconds=7200). Use 'cron_expr' for complex recurring schedules. Use 'command' only for real shell commands such as `df -h` or `dir`; do not put PicoClaw tool names or MCP tool names into `command`. If the scheduled task should call agent tools or MCP tools later, leave `command` empty, keep `deliver=false`, and describe the task in natural language with `message`."
 }
 
 // Parameters returns the tool parameters schema
@@ -71,7 +161,7 @@ func (t *CronTool) Parameters() map[string]any {
 			},
 			"command": map[string]any{
 				"type":        "string",
-				"description": "Optional: Shell command to execute directly (e.g., 'df -h'). If set, the agent will run this command and report output instead of just showing the message. 'deliver' will be forced to false for commands.",
+				"description": "Optional: shell command to execute directly (for example `df -h`, `dir`, or `uptime`). This field is only for real OS shell commands. Do not put PicoClaw tool names or MCP tool names here. If the scheduled task should call agent tools later, leave `command` empty and use `message` with `deliver=false` instead. When set, `deliver` will be forced to false.",
 			},
 			"at_seconds": map[string]any{
 				"type":        "integer",
@@ -177,6 +267,9 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 
 	command, _ := args["command"].(string)
 	if command != "" {
+		if scheduledCommandLooksLikeToolInvocation(command) {
+			return ErrorResult(scheduledToolInvocationError(command))
+		}
 		// Commands must be processed by agent/exec tool, so deliver must be false (or handled specifically)
 		// Actually, let's keep deliver=false to let the system know it's not a simple chat message
 		// But for our new logic in ExecuteJob, we can handle it regardless of deliver flag if Payload.Command is set.
@@ -186,6 +279,25 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 
 	// Truncate message for job name (max 30 chars)
 	messagePreview := utils.Truncate(message, 30)
+
+	if existing := findEquivalentCronJob(
+		t.cronService.ListJobs(true),
+		schedule,
+		message,
+		command,
+		deliver,
+		channel,
+		chatID,
+	); existing != nil {
+		if existing.Enabled {
+			return SilentResult(fmt.Sprintf("Cron job already exists: %s (id: %s)", existing.Name, existing.ID))
+		}
+		reenabled := t.cronService.EnableJob(existing.ID, true)
+		if reenabled == nil {
+			return ErrorResult(fmt.Sprintf("Error re-enabling duplicate cron job: %s", existing.ID))
+		}
+		return SilentResult(fmt.Sprintf("Cron job re-enabled: %s (id: %s)", reenabled.Name, reenabled.ID))
+	}
 
 	job, err := t.cronService.AddJob(
 		messagePreview,
@@ -280,6 +392,18 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 
 	// Execute command if present
 	if job.Payload.Command != "" {
+		if scheduledCommandLooksLikeToolInvocation(job.Payload.Command) {
+			output := "Error executing scheduled command: " + scheduledToolInvocationError(job.Payload.Command)
+			pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer pubCancel()
+			t.msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
+				Channel: channel,
+				ChatID:  chatID,
+				Content: output,
+			})
+			return "ok"
+		}
+
 		args := map[string]any{
 			"command": job.Payload.Command,
 		}
@@ -329,7 +453,9 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	// Response is automatically sent via MessageBus by AgentLoop
+	// The scheduled agent turn is expected to notify users through tools such as
+	// `message`; any trailing direct narration is intentionally suppressed for
+	// cron-scoped sessions.
 	_ = response // Will be sent by AgentLoop
 	return "ok"
 }

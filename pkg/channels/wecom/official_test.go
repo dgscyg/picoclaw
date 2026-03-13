@@ -1584,8 +1584,11 @@ func TestWeComOfficialTemplateCardEventPublishesInboundAndUpdatesCard(t *testing
 	if !strings.Contains(inbound.Content, "6872176FF500") {
 		t.Fatalf("expected inbound content to include device context, got %q", inbound.Content)
 	}
-	if !strings.Contains(inbound.Content, "Do not call `wecom_card` again") {
-		t.Fatalf("expected inbound content to block repeated wecom_card updates, got %q", inbound.Content)
+	if strings.Contains(inbound.Content, "Do not call `wecom_card` again") {
+		t.Fatalf("expected inbound content to avoid platform instruction scaffolding, got %q", inbound.Content)
+	}
+	if got, want := inbound.Metadata["card_context"], "按钮卡片, 设备控制, 设备ID=6872176FF500"; !strings.Contains(got, "6872176FF500") {
+		t.Fatalf("Metadata[card_context] = %q, want it to include device context like %q", got, want)
 	}
 	task := ch.activeReplyTask("user-card-event-1", inbound.Metadata["reply_to"])
 	if task == nil {
