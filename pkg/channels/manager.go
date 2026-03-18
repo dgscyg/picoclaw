@@ -59,6 +59,7 @@ type placeholderEntry struct {
 // channelRateConfig maps channel name to per-second rate limit.
 var channelRateConfig = map[string]float64{
 	"telegram": 20,
+	"claweb":   10,
 	"discord":  1,
 	"slack":    1,
 	"matrix":   2,
@@ -285,6 +286,13 @@ func (m *Manager) initChannels() error {
 
 	if m.config.Channels.IRC.Enabled && m.config.Channels.IRC.Server != "" {
 		m.initChannel("irc", "IRC")
+	}
+
+	clawebCfg := m.config.Channels.Claweb
+	if clawebCfg.Enabled &&
+		clawebCfg.ListenPort > 0 &&
+		(clawebCfg.AuthToken != "" || clawebCfg.AuthTokenFile != "") {
+		m.initChannel("claweb", "Claweb")
 	}
 
 	logger.InfoCF("channels", "Channel initialization completed", map[string]any{

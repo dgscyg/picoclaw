@@ -89,6 +89,12 @@ func DefaultConfig() *Config {
 				Port:      18790,
 				AllowFrom: FlexibleStringSlice{},
 			},
+			Claweb: ClawebConfig{
+				Enabled:    false,
+				ListenHost: "127.0.0.1",
+				ListenPort: 18999,
+				AllowFrom:  FlexibleStringSlice{},
+			},
 			QQ: QQConfig{
 				Enabled:   false,
 				AppID:     "",

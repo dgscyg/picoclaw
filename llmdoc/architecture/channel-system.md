@@ -23,6 +23,7 @@
 - `pkg/channels/slack/slack.go` (`SlackChannel`): Slack via Socket Mode; supports reaction, editing, media.
 - `pkg/channels/feishu/feishu_64.go` (`FeishuChannel`): Lark SDK; supports cards, reaction, placeholder, media.
 - `pkg/channels/qq/qq.go` (`QQChannel`): Tencent QQ via botgo; WebSocket-based with deduplication.
+- `pkg/channels/claweb/claweb.go` (`ClawebChannel`): Standalone WebSocket upstream bridge compatible with CLAWeb frontdoor/browser `hello -> ready -> message` protocol; starts its own listener on `channels.claweb.listen_host/listen_port`, maps inbound text/media into PicoClaw bus messages, and reuses outbound `ReplyTo` as the assistant turn ID for frontdoor aggregation.
 - `pkg/channels/wecom/bot.go` (`WeComBotChannel`): WeCom webhook; implements WebhookHandler for callbacks.
 - `pkg/channels/wecom/official.go`, `app.go`, `aibot.go`: WeCom variants for official accounts, apps, and AI bots. `official.go` now covers callback-scoped `replyStream`, explicit `template_card` replies, `template_card_event` auto-update handling via `aibot_respond_update_msg`, callback `response_url` markdown follow-up, and sanitized template-card event content that preserves only user action semantics plus card context in metadata. Template-card callbacks are parsed from the official nested payload `event.template_card_event.*`, so button `event_key`, `card_type`, `task_id`, and `selected_items` survive into inbound metadata instead of collapsing into a generic click event.
 - `pkg/channels/qclaw/qclaw.go` (`QClawChannel`): QClaw AGP WebSocket; WeChat service account integration with streaming responses.
@@ -70,7 +71,7 @@ Sentinel errors (`ErrRateLimit`, `ErrTemporary`, `ErrSendFailed`) enable appropr
 
 ### Rate Limiting
 
-Per-channel rate limits configured in `channelRateConfig`: telegram (20/s), discord (1/s), slack (1/s), matrix (2/s), line (10/s), irc (2/s), qclaw (10/s).
+Per-channel rate limits configured in `channelRateConfig`: telegram (20/s), claweb (10/s), discord (1/s), slack (1/s), matrix (2/s), line (10/s), irc (2/s), qclaw (10/s).
 
 ### Group Trigger Modes
 

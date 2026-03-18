@@ -223,6 +223,7 @@ type ChannelsConfig struct {
 	Feishu        FeishuConfig        `json:"feishu"`
 	Discord       DiscordConfig       `json:"discord"`
 	MaixCam       MaixCamConfig       `json:"maixcam"`
+	Claweb        ClawebConfig        `json:"claweb"`
 	QQ            QQConfig            `json:"qq"`
 	DingTalk      DingTalkConfig      `json:"dingtalk"`
 	Slack         SlackConfig         `json:"slack"`
@@ -313,6 +314,17 @@ type MaixCamConfig struct {
 	Port               int                 `json:"port"                 env:"PICOCLAW_CHANNELS_MAIXCAM_PORT"`
 	AllowFrom          FlexibleStringSlice `json:"allow_from"           env:"PICOCLAW_CHANNELS_MAIXCAM_ALLOW_FROM"`
 	ReasoningChannelID string              `json:"reasoning_channel_id" env:"PICOCLAW_CHANNELS_MAIXCAM_REASONING_CHANNEL_ID"`
+}
+
+type ClawebConfig struct {
+	Enabled            bool                `json:"enabled"              env:"PICOCLAW_CHANNELS_CLAWEB_ENABLED"`
+	ListenHost         string              `json:"listen_host"          env:"PICOCLAW_CHANNELS_CLAWEB_LISTEN_HOST"`
+	ListenPort         int                 `json:"listen_port"          env:"PICOCLAW_CHANNELS_CLAWEB_LISTEN_PORT"`
+	AuthToken          string              `json:"auth_token"           env:"PICOCLAW_CHANNELS_CLAWEB_AUTH_TOKEN"`
+	AuthTokenFile      string              `json:"auth_token_file"      env:"PICOCLAW_CHANNELS_CLAWEB_AUTH_TOKEN_FILE"`
+	AllowFrom          FlexibleStringSlice `json:"allow_from"           env:"PICOCLAW_CHANNELS_CLAWEB_ALLOW_FROM"`
+	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
+	ReasoningChannelID string              `json:"reasoning_channel_id" env:"PICOCLAW_CHANNELS_CLAWEB_REASONING_CHANNEL_ID"`
 }
 
 type QQConfig struct {

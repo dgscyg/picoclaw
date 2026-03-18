@@ -96,6 +96,16 @@
       "allow_from": [],
       "reasoning_channel_id": ""
     },
+    "claweb": {
+      "_comment": "CLAWeb WebSocket bridge - upstream endpoint for claweb frontdoor/browser.",
+      "enabled": false,
+      "listen_host": "127.0.0.1",
+      "listen_port": 18999,
+      "auth_token": "",
+      "auth_token_file": "",
+      "allow_from": [],
+      "reasoning_channel_id": ""
+    },
     "whatsapp": {
       "enabled": false,
       "bridge_url": "ws://localhost:3001",

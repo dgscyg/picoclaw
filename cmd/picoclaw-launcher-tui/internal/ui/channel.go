@@ -38,6 +38,12 @@ func (s *appState) buildChannelMenuItems() []MenuItem {
 			func() { s.push("channel-maixcam", s.maixcamForm()) },
 		),
 		channelItem(
+			"Claweb",
+			"Claweb WebSocket bridge",
+			s.config.Channels.Claweb.Enabled,
+			func() { s.push("channel-claweb", s.clawebForm()) },
+		),
+		channelItem(
 			"WhatsApp",
 			"WhatsApp bridge",
 			s.config.Channels.WhatsApp.Enabled,
@@ -166,6 +172,23 @@ func (s *appState) maixcamForm() tview.Primitive {
 		cfg.Host = strings.TrimSpace(text)
 	})
 	addIntField(form, "Port", cfg.Port, func(value int) { cfg.Port = value })
+	addAllowFromField(form, &cfg.AllowFrom)
+	return wrapWithBack(form, s)
+}
+
+func (s *appState) clawebForm() tview.Primitive {
+	cfg := &s.config.Channels.Claweb
+	form := baseChannelForm("Claweb", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
+	form.AddInputField("Listen Host", cfg.ListenHost, 64, nil, func(text string) {
+		cfg.ListenHost = strings.TrimSpace(text)
+	})
+	addIntField(form, "Listen Port", cfg.ListenPort, func(value int) { cfg.ListenPort = value })
+	form.AddInputField("Auth Token", cfg.AuthToken, 128, nil, func(text string) {
+		cfg.AuthToken = strings.TrimSpace(text)
+	})
+	form.AddInputField("Auth Token File", cfg.AuthTokenFile, 128, nil, func(text string) {
+		cfg.AuthTokenFile = strings.TrimSpace(text)
+	})
 	addAllowFromField(form, &cfg.AllowFrom)
 	return wrapWithBack(form, s)
 }
