@@ -99,10 +99,9 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
 
-	// Atomic rename: temp file becomes the target
-	// On POSIX: rename() is atomic
-	// On Windows: Rename() is atomic for files
-	if err := os.Rename(tmpPath, path); err != nil {
+	// Atomically replace the target with the temp file.
+	// On Windows this must explicitly allow replacing an existing file.
+	if err := replaceFileAtomic(tmpPath, path); err != nil {
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 

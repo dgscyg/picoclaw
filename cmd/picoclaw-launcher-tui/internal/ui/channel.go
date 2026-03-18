@@ -37,6 +37,12 @@ func (s *appState) buildChannelMenuItems() []MenuItem {
 			func() { s.push("channel-maixcam", s.maixcamForm()) },
 		),
 		channelItem(
+			"Claweb",
+			"Claweb WebSocket bridge",
+			s.config.Channels.Claweb.Enabled,
+			func() { s.push("channel-claweb", s.clawebForm()) },
+		),
+		channelItem(
 			"WhatsApp",
 			"WhatsApp bridge",
 			s.config.Channels.WhatsApp.Enabled,
@@ -89,6 +95,12 @@ func (s *appState) buildChannelMenuItems() []MenuItem {
 			"WeCom App settings",
 			s.config.Channels.WeComApp.Enabled,
 			func() { s.push("channel-wecomapp", s.wecomAppForm()) },
+		),
+		channelItem(
+			"WeCom Official",
+			"WeCom official websocket settings",
+			s.config.Channels.WeComOfficial.Enabled,
+			func() { s.push("channel-wecomofficial", s.wecomOfficialForm()) },
 		),
 	}
 }
@@ -155,6 +167,23 @@ func (s *appState) maixcamForm() tview.Primitive {
 		cfg.Host = strings.TrimSpace(text)
 	})
 	addIntField(form, "Port", cfg.Port, func(value int) { cfg.Port = value })
+	addAllowFromField(form, &cfg.AllowFrom)
+	return wrapWithBack(form, s)
+}
+
+func (s *appState) clawebForm() tview.Primitive {
+	cfg := &s.config.Channels.Claweb
+	form := baseChannelForm("Claweb", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
+	form.AddInputField("Listen Host", cfg.ListenHost, 64, nil, func(text string) {
+		cfg.ListenHost = strings.TrimSpace(text)
+	})
+	addIntField(form, "Listen Port", cfg.ListenPort, func(value int) { cfg.ListenPort = value })
+	form.AddInputField("Auth Token", cfg.AuthToken, 128, nil, func(text string) {
+		cfg.AuthToken = strings.TrimSpace(text)
+	})
+	form.AddInputField("Auth Token File", cfg.AuthTokenFile, 128, nil, func(text string) {
+		cfg.AuthTokenFile = strings.TrimSpace(text)
+	})
 	addAllowFromField(form, &cfg.AllowFrom)
 	return wrapWithBack(form, s)
 }
@@ -344,6 +373,54 @@ func (s *appState) wecomAppForm() tview.Primitive {
 		func(value int) { cfg.ReplyTimeout = value },
 	)
 	return wrapWithBack(form, s)
+}
+
+func (s *appState) wecomOfficialForm() tview.Primitive {
+	cfg := &s.config.Channels.WeComOfficial
+	form := baseChannelForm("WeCom Official", cfg.Enabled, s.makeChannelOnEnabled(&cfg.Enabled))
+	form.AddInputField("Bot ID", cfg.BotID, 128, nil, func(text string) {
+		cfg.BotID = strings.TrimSpace(text)
+	})
+	form.AddInputField("Secret", cfg.Secret, 128, nil, func(text string) {
+		cfg.Secret = strings.TrimSpace(text)
+	})
+	form.AddInputField("WebSocket URL", cfg.WebSocketURL, 128, nil, func(text string) {
+		cfg.WebSocketURL = strings.TrimSpace(text)
+	})
+	thinkingEnabled := cfg.Placeholder.Enabled
+	if cfg.SendThinkingMessage != nil {
+		thinkingEnabled = *cfg.SendThinkingMessage
+	}
+	form.AddCheckbox("Send Thinking", thinkingEnabled, func(checked bool) {
+		cfg.SendThinkingMessage = boolPtr(checked)
+		cfg.Placeholder.Enabled = checked
+	})
+	placeholderText := cfg.Placeholder.Text
+	if strings.TrimSpace(placeholderText) == "" {
+		placeholderText = "Thinking... 💭"
+	}
+	form.AddInputField("Placeholder Text", placeholderText, 128, nil, func(text string) {
+		cfg.Placeholder.Text = text
+	})
+	form.AddCheckbox("Use Card", cfg.Card.Enabled, func(checked bool) {
+		cfg.Card.Enabled = checked
+	})
+	cardTitle := cfg.Card.Title
+	if strings.TrimSpace(cardTitle) == "" {
+		cardTitle = "PicoClaw"
+	}
+	form.AddInputField("Card Title", cardTitle, 128, nil, func(text string) {
+		cfg.Card.Title = strings.TrimSpace(text)
+	})
+	form.AddInputField("Welcome Message", cfg.WelcomeMessage, 256, nil, func(text string) {
+		cfg.WelcomeMessage = text
+	})
+	addAllowFromField(form, &cfg.AllowFrom)
+	return wrapWithBack(form, s)
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func (s *appState) makeChannelOnEnabled(enabledPtr *bool) func(bool) {

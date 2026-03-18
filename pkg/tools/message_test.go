@@ -3,21 +3,23 @@ package tools
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
 func TestMessageTool_Execute_Success(t *testing.T) {
 	tool := NewMessageTool()
 
-	var sentChannel, sentChatID, sentContent string
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	var sentChannel, sentChatID, sentContent, sentReplyTo string
+	tool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
 		sentChannel = channel
 		sentChatID = chatID
 		sentContent = content
+		sentReplyTo = ToolReplyTo(ctx)
 		return nil
 	})
 
-	ctx := WithToolContext(context.Background(), "test-channel", "test-chat-id")
+	ctx := WithToolRoutingContext(context.Background(), "test-channel", "test-chat-id", "reply-1")
 	args := map[string]any{
 		"content": "Hello, world!",
 	}
@@ -34,11 +36,17 @@ func TestMessageTool_Execute_Success(t *testing.T) {
 	if sentContent != "Hello, world!" {
 		t.Errorf("Expected content 'Hello, world!', got '%s'", sentContent)
 	}
+	if sentReplyTo != "reply-1" {
+		t.Errorf("Expected replyTo 'reply-1', got '%s'", sentReplyTo)
+	}
 
 	// Verify ToolResult meets US-011 criteria:
 	// - Send success returns SilentResult (Silent=true)
 	if !result.Silent {
 		t.Error("Expected Silent=true for successful send")
+	}
+	if !result.ConsumesCurrentTurn {
+		t.Error("Expected ConsumesCurrentTurn=true for current conversation send")
 	}
 
 	// - ForLLM contains send status description
@@ -61,7 +69,7 @@ func TestMessageTool_Execute_WithCustomChannel(t *testing.T) {
 	tool := NewMessageTool()
 
 	var sentChannel, sentChatID string
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(_ context.Context, channel, chatID, content string) error {
 		sentChannel = channel
 		sentChatID = chatID
 		return nil
@@ -87,8 +95,167 @@ func TestMessageTool_Execute_WithCustomChannel(t *testing.T) {
 	if !result.Silent {
 		t.Error("Expected Silent=true")
 	}
+	if result.ConsumesCurrentTurn {
+		t.Error("Expected ConsumesCurrentTurn=false for cross-target send")
+	}
 	if result.ForLLM != "Message sent to custom-channel:custom-chat-id" {
 		t.Errorf("Expected ForLLM 'Message sent to custom-channel:custom-chat-id', got '%s'", result.ForLLM)
+	}
+}
+
+func TestMessageTool_Execute_SeparateMessageClearsReplyTo(t *testing.T) {
+	tool := NewMessageTool()
+	const roundID = "round-separate"
+
+	var sentReplyTo string
+	tool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
+		sentReplyTo = ToolReplyTo(ctx)
+		return nil
+	})
+
+	ctx := WithToolRoundID(
+		WithToolRoutingContext(context.Background(), "wecom_official", "YangXu", "callback-1"),
+		roundID,
+	)
+	args := map[string]any{
+		"content":          "independent",
+		"separate_message": true,
+	}
+
+	result := tool.Execute(ctx, args)
+	if !result.Silent {
+		t.Fatal("expected silent result")
+	}
+	if sentReplyTo != "" {
+		t.Fatalf("expected empty replyTo for separate message, got %q", sentReplyTo)
+	}
+	if result.ConsumesCurrentTurn {
+		t.Fatal("separate_message should not consume the current turn")
+	}
+	if tool.HasSentInRound(roundID) {
+		t.Fatal("separate_message should not mark the round as already replied")
+	}
+}
+
+func TestMessageTool_Execute_WeComOfficialSecondSendClearsReplyTo(t *testing.T) {
+	tool := NewMessageTool()
+	const roundID = "round-second-send"
+
+	replyTos := make([]string, 0, 2)
+	tool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
+		replyTos = append(replyTos, ToolReplyTo(ctx))
+		return nil
+	})
+
+	ctx := WithToolRoundID(
+		WithToolRoutingContext(context.Background(), "wecom_official", "YangXu", "callback-1"),
+		roundID,
+	)
+	first := tool.Execute(ctx, map[string]any{"content": "3"})
+	if first.IsError {
+		t.Fatalf("first execute error: %v", first.ForLLM)
+	}
+	second := tool.Execute(ctx, map[string]any{"content": "2"})
+	if second.IsError {
+		t.Fatalf("second execute error: %v", second.ForLLM)
+	}
+
+	if len(replyTos) != 2 {
+		t.Fatalf("expected 2 sends, got %d", len(replyTos))
+	}
+	if got, want := replyTos[0], "callback-1"; got != want {
+		t.Fatalf("first replyTo = %q, want %q", got, want)
+	}
+	if got := replyTos[1]; got != "" {
+		t.Fatalf("second replyTo = %q, want empty", got)
+	}
+}
+
+func TestMessageTool_Execute_CrossTargetSendDoesNotMarkRoundReplied(t *testing.T) {
+	tool := NewMessageTool()
+	const roundID = "round-cross-target"
+
+	var sentReplyTo string
+	tool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
+		sentReplyTo = ToolReplyTo(ctx)
+		return nil
+	})
+
+	ctx := WithToolRoundID(
+		WithToolRoutingContext(context.Background(), "wecom_official", "dragonsss", "callback-1"),
+		roundID,
+	)
+	result := tool.Execute(ctx, map[string]any{
+		"content": "任务进度",
+		"chat_id": "WangCheng",
+	})
+
+	if result.IsError {
+		t.Fatalf("execute error: %v", result.ForLLM)
+	}
+	if sentReplyTo != "" {
+		t.Fatalf("expected cross-target send to clear replyTo, got %q", sentReplyTo)
+	}
+	if result.ConsumesCurrentTurn {
+		t.Fatal("cross-target send should not consume the current turn")
+	}
+	if tool.HasSentInRound(roundID) {
+		t.Fatal("cross-target send should not mark the current round as already replied")
+	}
+}
+
+func TestMessageTool_Execute_CrossTargetRequestWithoutChatIDReturnsError(t *testing.T) {
+	tool := NewMessageTool()
+
+	ctx := WithToolUserMessage(
+		WithToolRoutingContext(context.Background(), "wecom_official", "dragonsss", "callback-1"),
+		`通知王成，给他发送 "123"`,
+	)
+	result := tool.Execute(ctx, map[string]any{
+		"content": "王成，123",
+	})
+
+	if !result.IsError {
+		t.Fatal("expected error when cross-target request omits chat_id")
+	}
+	if !strings.Contains(result.ForLLM, "chat_id is required") {
+		t.Fatalf("unexpected error: %q", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "recall/search memory") {
+		t.Fatalf("expected memory lookup hint, got %q", result.ForLLM)
+	}
+}
+
+func TestMessageTool_Execute_CurrentConversationWithoutChatIDStillAllowed(t *testing.T) {
+	tool := NewMessageTool()
+
+	var sentChannel, sentChatID, sentContent string
+	tool.SetSendCallback(func(_ context.Context, channel, chatID, content string) error {
+		sentChannel = channel
+		sentChatID = chatID
+		sentContent = content
+		return nil
+	})
+
+	ctx := WithToolUserMessage(
+		WithToolRoutingContext(context.Background(), "wecom_official", "dragonsss", "callback-1"),
+		`给我发送 "123"`,
+	)
+	result := tool.Execute(ctx, map[string]any{
+		"content": "123",
+	})
+
+	if result.IsError {
+		t.Fatalf("unexpected error: %v", result.ForLLM)
+	}
+	if got, want := sentChannel, "wecom_official"; got != want {
+		t.Fatalf("channel = %q, want %q", got, want)
+	}
+	if got, want := sentChatID, "dragonsss"; got != want {
+		t.Fatalf("chatID = %q, want %q", got, want)
+	}
+	if got, want := sentContent, "123"; got != want {
+		t.Fatalf("content = %q, want %q", got, want)
 	}
 }
 
@@ -96,7 +263,7 @@ func TestMessageTool_Execute_SendFailure(t *testing.T) {
 	tool := NewMessageTool()
 
 	sendErr := errors.New("network error")
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(_ context.Context, channel, chatID, content string) error {
 		return sendErr
 	})
 
@@ -149,7 +316,7 @@ func TestMessageTool_Execute_NoTargetChannel(t *testing.T) {
 	tool := NewMessageTool()
 	// No WithToolContext — channel/chatID are empty
 
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(_ context.Context, channel, chatID, content string) error {
 		return nil
 	})
 
@@ -201,6 +368,15 @@ func TestMessageTool_Description(t *testing.T) {
 	desc := tool.Description()
 	if desc == "" {
 		t.Error("Description should not be empty")
+	}
+	if !strings.Contains(desc, "template_card") {
+		t.Error("Description should mention template_card direct sending for wecom_official")
+	}
+	if !strings.Contains(desc, "exact target `chat_id` explicitly") {
+		t.Error("Description should mention explicit chat_id requirement for cross-target sends")
+	}
+	if !strings.Contains(desc, "recall/search memory first") {
+		t.Error("Description should instruct recalling/searching memory before cross-target sends")
 	}
 }
 

@@ -55,28 +55,39 @@ type AgentLoop struct {
 
 // processOptions configures how a message is processed
 type processOptions struct {
-	SessionKey        string   // Session identifier for history/context
-	Channel           string   // Target channel for tool execution
-	ChatID            string   // Target chat ID for tool execution
-	SenderID          string   // Current sender ID for dynamic context
-	SenderDisplayName string   // Current sender display name for dynamic context
-	UserMessage       string   // User message content (may include prefix)
-	Media             []string // media:// refs from inbound message
-	DefaultResponse   string   // Response when LLM returns empty
-	EnableSummary     bool     // Whether to trigger summarization
-	SendResponse      bool     // Whether to send response via bus
-	NoHistory         bool     // If true, don't load session history (for heartbeat)
+	RoundID              string   // Per-processing-round identifier for tool send tracking
+	SessionKey           string   // Session identifier for history/context
+	Channel              string   // Target channel for tool execution
+	ChatID               string   // Target chat ID for tool execution
+	ReplyTo              string   // Optional channel-specific reply correlation token
+	SuppressPostCardText bool     // If true, suppress final assistant text after direct card delivery
+	SenderID             string   // Current sender ID for dynamic context
+	SenderDisplayName    string   // Current sender display name for dynamic context
+	UserMessage          string   // User message content (may include prefix)
+	HistoryUserMessage   string   // Optional sanitized user message persisted to session history
+	Media                []string // media:// refs from inbound message
+	DefaultResponse      string   // Response when LLM returns empty
+	EnableSummary        bool     // Whether to trigger summarization
+	SendResponse         bool     // Whether to send response via bus
+	NoHistory            bool     // If true, don't load session history (for heartbeat)
 }
 
 const (
 	defaultResponse           = "I've completed processing but have no response to give. Increase `max_tool_iterations` in config.json."
 	sessionKeyAgentPrefix     = "agent:"
+	sessionKeyCronPrefix      = "cron-"
 	metadataKeyAccountID      = "account_id"
 	metadataKeyGuildID        = "guild_id"
 	metadataKeyTeamID         = "team_id"
 	metadataKeyParentPeerKind = "parent_peer_kind"
 	metadataKeyParentPeerID   = "parent_peer_id"
 )
+
+var toolRoundCounter atomic.Uint64
+
+func newToolRoundID() string {
+	return fmt.Sprintf("round-%d-%d", time.Now().UnixNano(), toolRoundCounter.Add(1))
+}
 
 func NewAgentLoop(
 	cfg *config.Config,
@@ -108,8 +119,74 @@ func NewAgentLoop(
 		fallback:    fallbackChain,
 		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
 	}
+	al.installSharedSendCallbacks()
 
 	return al
+}
+
+func (al *AgentLoop) installSharedSendCallbacks() {
+	if al == nil {
+		return
+	}
+	al.registry.ForEachTool("message", func(t tools.Tool) {
+		if mt, ok := t.(*tools.MessageTool); ok {
+			mt.SetSendCallback(al.sendToolMessage)
+		}
+	})
+	al.registry.ForEachTool("wecom_card", func(t tools.Tool) {
+		if wt, ok := t.(*tools.WecomCardTool); ok {
+			wt.SetSendCallback(al.sendToolMessage)
+		}
+	})
+}
+
+func (al *AgentLoop) sendToolMessage(
+	ctx context.Context,
+	channel, chatID, content string,
+) error {
+	replyTo := al.normalizeReplyToForOutbound(channel, chatID, tools.ToolReplyTo(ctx))
+	if channel == "wecom_official" && al.channelManager != nil {
+		if ch, ok := al.channelManager.GetChannel(channel); ok {
+			sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			return ch.Send(sendCtx, bus.OutboundMessage{
+				Channel: channel,
+				ChatID:  chatID,
+				Content: content,
+				ReplyTo: replyTo,
+			})
+		}
+	}
+
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer pubCancel()
+	return al.bus.PublishOutbound(pubCtx, bus.OutboundMessage{
+		Channel: channel,
+		ChatID:  chatID,
+		Content: content,
+		ReplyTo: replyTo,
+	})
+}
+
+func (al *AgentLoop) normalizeReplyToForOutbound(channel, chatID, replyTo string) string {
+	replyTo = strings.TrimSpace(replyTo)
+	if replyTo == "" || channel == "" || chatID == "" || al.channelManager == nil {
+		return replyTo
+	}
+	ch, ok := al.channelManager.GetChannel(channel)
+	if !ok || ch == nil {
+		return replyTo
+	}
+	type replyReuseInspector interface {
+		CanReuseReply(chatID, replyTo string) bool
+	}
+	if inspector, ok := ch.(replyReuseInspector); ok {
+		if inspector.CanReuseReply(chatID, replyTo) {
+			return replyTo
+		}
+		return ""
+	}
+	return replyTo
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
@@ -185,19 +262,34 @@ func registerSharedTools(
 		// Message tool
 		if cfg.Tools.IsToolEnabled("message") {
 			messageTool := tools.NewMessageTool()
-			messageTool.SetSendCallback(func(channel, chatID, content string) error {
+			messageTool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
 				pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer pubCancel()
 				return msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
 					Channel: channel,
 					ChatID:  chatID,
 					Content: content,
+					ReplyTo: tools.ToolReplyTo(ctx),
 				})
 			})
 			agent.Tools.Register(messageTool)
+
+			wecomCardTool := tools.NewWecomCardTool()
+			wecomCardTool.SetDefaultTitle(cfg.Channels.WeComOfficial.Card.Title)
+			wecomCardTool.SetSendCallback(func(ctx context.Context, channel, chatID, content string) error {
+				pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer pubCancel()
+				return msgBus.PublishOutbound(pubCtx, bus.OutboundMessage{
+					Channel: channel,
+					ChatID:  chatID,
+					Content: content,
+					ReplyTo: tools.ToolReplyTo(ctx),
+				})
+			})
+			agent.Tools.Register(wecomCardTool)
 		}
 
-		// Send file tool (outbound media via MediaStore — store injected later by SetMediaStore)
+		// Send file tool (outbound media via MediaStore 閳?store injected later by SetMediaStore)
 		if cfg.Tools.IsToolEnabled("send_file") {
 			sendFileTool := tools.NewSendFileTool(
 				agent.Workspace,
@@ -285,45 +377,51 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			// 	}
 			// }()
 
-			response, err := al.processMessage(ctx, msg)
-			if err != nil {
-				response = fmt.Sprintf("Error processing message: %v", err)
-			}
+			// Process message
+			func() {
+				response, roundID, err := al.processMessageDetailed(ctx, msg)
+				if err != nil {
+					response = fmt.Sprintf("Error processing message: %v", err)
+				}
 
-			if response != "" {
-				// Check if the message tool already sent a response during this round.
-				// If so, skip publishing to avoid duplicate messages to the user.
-				// Use default agent's tools to check (message tool is shared).
-				alreadySent := false
-				defaultAgent := al.GetRegistry().GetDefaultAgent()
-				if defaultAgent != nil {
-					if tool, ok := defaultAgent.Tools.Get("message"); ok {
-						if mt, ok := tool.(*tools.MessageTool); ok {
-							alreadySent = mt.HasSentInRound()
+				if response != "" {
+					// Check if the message tool already sent a response during this round.
+					// If so, skip publishing to avoid duplicate messages to the user.
+					// Use default agent's tools to check (message tool is shared).
+					alreadySent := false
+					defaultAgent := al.registry.GetDefaultAgent()
+					if defaultAgent != nil {
+						alreadySent = didAnyRoundSendTrackerSend(defaultAgent, roundID, "message")
+						if inboundMetadata(msg, "event_type") == "template_card_event" {
+							alreadySent = alreadySent || didAnyRoundSendTrackerSend(defaultAgent, roundID, "wecom_card")
 						}
 					}
-				}
 
-				if !alreadySent {
-					al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-						Channel: msg.Channel,
-						ChatID:  msg.ChatID,
-						Content: response,
-					})
-					logger.InfoCF("agent", "Published outbound response",
-						map[string]any{
-							"channel":     msg.Channel,
-							"chat_id":     msg.ChatID,
-							"content_len": len(response),
+					if !alreadySent {
+						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
+							Channel: msg.Channel,
+							ChatID:  msg.ChatID,
+							Content: response,
+							ReplyTo: al.normalizeReplyToForOutbound(msg.Channel, msg.ChatID, inboundMetadata(msg, "reply_to")),
 						})
-				} else {
-					logger.DebugCF(
-						"agent",
-						"Skipped outbound (message tool already sent)",
-						map[string]any{"channel": msg.Channel},
-					)
+						logger.InfoCF("agent", "Published outbound response",
+							map[string]any{
+								"channel":     msg.Channel,
+								"chat_id":     msg.ChatID,
+								"content_len": len(response),
+							})
+					} else {
+						logger.DebugCF(
+							"agent",
+							"Skipped outbound (message already sent in this round)",
+							map[string]any{
+								"channel":    msg.Channel,
+								"event_type": inboundMetadata(msg, "event_type"),
+							},
+						)
+					}
 				}
-			}
+			}()
 		default:
 			time.Sleep(time.Microsecond * 200)
 		}
@@ -675,9 +773,11 @@ func (al *AgentLoop) ProcessHeartbeat(
 		return "", fmt.Errorf("no default agent for heartbeat")
 	}
 	return al.runAgentLoop(ctx, agent, processOptions{
+		RoundID:         newToolRoundID(),
 		SessionKey:      "heartbeat",
 		Channel:         channel,
 		ChatID:          chatID,
+		ReplyTo:         "",
 		UserMessage:     content,
 		DefaultResponse: defaultResponse,
 		EnableSummary:   false,
@@ -687,6 +787,11 @@ func (al *AgentLoop) ProcessHeartbeat(
 }
 
 func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
+	response, _, err := al.processMessageDetailed(ctx, msg)
+	return response, err
+}
+
+func (al *AgentLoop) processMessageDetailed(ctx context.Context, msg bus.InboundMessage) (string, string, error) {
 	// Add message preview to log (show full content for error messages)
 	var logContent string
 	if strings.Contains(msg.Content, "Error:") || strings.Contains(msg.Content, "error") {
@@ -716,20 +821,46 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 
 	// Route system messages to processSystemMessage
 	if msg.Channel == "system" {
-		return al.processSystemMessage(ctx, msg)
+		response, err := al.processSystemMessage(ctx, msg)
+		return response, "", err
 	}
 
 	route, agent, routeErr := al.resolveMessageRoute(msg)
+
+	// Commands are checked before requiring a successful route.
+	// Global commands (/help, /show, /switch) work even when routing fails;
+	// context-dependent commands check their own Runtime fields and report
+	// "unavailable" when the required capability is nil.
+	opts := processOptions{
+		RoundID:              newToolRoundID(),
+		SessionKey:           "",
+		Channel:              msg.Channel,
+		ChatID:               msg.ChatID,
+		ReplyTo:              inboundMetadata(msg, "reply_to"),
+		SuppressPostCardText: inboundMetadata(msg, "event_type") == "template_card_event",
+		SenderID:             msg.SenderID,
+		SenderDisplayName:    msg.Sender.DisplayName,
+		UserMessage:          userMessageForInbound(msg),
+		HistoryUserMessage:   historyUserMessageForInbound(msg),
+		Media:                msg.Media,
+		DefaultResponse:      defaultResponse,
+		EnableSummary:        true,
+		SendResponse:         false,
+	}
+	if response, handled := al.handleCommand(ctx, msg, agent, &opts); handled {
+		return response, "", nil
+	}
 	if routeErr != nil {
-		return "", routeErr
+		return "", "", routeErr
 	}
 
-	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
-	if tool, ok := agent.Tools.Get("message"); ok {
-		if resetter, ok := tool.(interface{ ResetSentInRound() }); ok {
-			resetter.ResetSentInRound()
-		}
-	}
+	roundID := newToolRoundID()
+	// Ensure any stale state keyed by the same round identifier is cleared, then
+	// clean it up again after processing completes.
+	resetRoundSendTracker(agent, "message", roundID)
+	resetRoundSendTracker(agent, "wecom_card", roundID)
+	defer resetRoundSendTracker(agent, "message", roundID)
+	defer resetRoundSendTracker(agent, "wecom_card", roundID)
 
 	// Resolve session key from route, while preserving explicit agent-scoped keys.
 	scopeKey := resolveScopeKey(route, msg.SessionKey)
@@ -745,26 +876,86 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 			"route_channel": route.Channel,
 		})
 
-	opts := processOptions{
-		SessionKey:        sessionKey,
-		Channel:           msg.Channel,
-		ChatID:            msg.ChatID,
-		SenderID:          msg.SenderID,
-		SenderDisplayName: msg.Sender.DisplayName,
-		UserMessage:       msg.Content,
-		Media:             msg.Media,
-		DefaultResponse:   defaultResponse,
-		EnableSummary:     true,
-		SendResponse:      false,
-	}
+	opts.RoundID = roundID
+	opts.SessionKey = sessionKey
+	opts.UserMessage = userMessageForInbound(msg)
+	opts.HistoryUserMessage = historyUserMessageForInbound(msg)
 
-	// context-dependent commands check their own Runtime fields and report
-	// "unavailable" when the required capability is nil.
-	if response, handled := al.handleCommand(ctx, msg, agent, &opts); handled {
-		return response, nil
-	}
+	response, err := al.runAgentLoop(ctx, agent, opts)
+	return response, roundID, err
+}
 
-	return al.runAgentLoop(ctx, agent, opts)
+func userMessageForInbound(msg bus.InboundMessage) string {
+	if inboundMetadata(msg, "event_type") != "template_card_event" {
+		return msg.Content
+	}
+	actionText := strings.TrimSpace(inboundMetadata(msg, "event_action_text"))
+	eventKey := strings.TrimSpace(inboundMetadata(msg, "event_key"))
+	cardContext := strings.TrimSpace(inboundMetadata(msg, "card_context"))
+	if actionText != "" || eventKey != "" || cardContext != "" {
+		return buildTemplateCardEventUserMessage(actionText, eventKey, cardContext)
+	}
+	if normalized, ok := normalizeTemplateCardEventHistory(msg.Content); ok {
+		if strings.TrimSpace(normalized) != "" {
+			return normalized
+		}
+	}
+	return "User clicked a template card action."
+}
+
+func historyUserMessageForInbound(msg bus.InboundMessage) string {
+	if inboundMetadata(msg, "event_type") != "template_card_event" {
+		return msg.Content
+	}
+	actionText := strings.TrimSpace(inboundMetadata(msg, "event_action_text"))
+	if actionText != "" {
+		return fmt.Sprintf("User clicked template card action: %s.", actionText)
+	}
+	eventKey := strings.TrimSpace(inboundMetadata(msg, "event_key"))
+	if eventKey != "" {
+		return fmt.Sprintf("User clicked template card action key: %s.", eventKey)
+	}
+	return "User clicked a template card action."
+}
+
+func buildTemplateCardEventUserMessage(actionText, eventKey, cardContext string) string {
+	switch {
+	case strings.TrimSpace(actionText) != "":
+		if strings.TrimSpace(cardContext) != "" {
+			return fmt.Sprintf("User clicked template card action: %s. Card context: %s.", strings.TrimSpace(actionText), strings.TrimSpace(cardContext))
+		}
+		return fmt.Sprintf("User clicked template card action: %s.", strings.TrimSpace(actionText))
+	case strings.TrimSpace(eventKey) != "":
+		if strings.TrimSpace(cardContext) != "" {
+			return fmt.Sprintf("User clicked template card action key: %s. Card context: %s.", strings.TrimSpace(eventKey), strings.TrimSpace(cardContext))
+		}
+		return fmt.Sprintf("User clicked template card action key: %s.", strings.TrimSpace(eventKey))
+	case strings.TrimSpace(cardContext) != "":
+		return fmt.Sprintf("User clicked a template card action. Card context: %s.", strings.TrimSpace(cardContext))
+	default:
+		return "User clicked a template card action."
+	}
+}
+
+func toolCallRequiresSequentialExecution(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "message", "wecom_card", "send_file":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldExecuteToolCallsSequentially(calls []providers.ToolCall) bool {
+	if len(calls) <= 1 {
+		return false
+	}
+	for _, tc := range calls {
+		if toolCallRequiresSequentialExecution(tc.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.ResolvedRoute, *AgentInstance, error) {
@@ -790,10 +981,86 @@ func (al *AgentLoop) resolveMessageRoute(msg bus.InboundMessage) (routing.Resolv
 }
 
 func resolveScopeKey(route routing.ResolvedRoute, msgSessionKey string) string {
-	if msgSessionKey != "" && strings.HasPrefix(msgSessionKey, sessionKeyAgentPrefix) {
+	if strings.TrimSpace(msgSessionKey) != "" {
 		return msgSessionKey
 	}
 	return route.SessionKey
+}
+
+type roundSendTracker interface {
+	ResetSentInRound(roundID string)
+	HasSentInRound(roundID string) bool
+}
+
+func resetRoundSendTracker(agent *AgentInstance, toolName, roundID string) {
+	if agent == nil {
+		return
+	}
+	tool, ok := agent.Tools.Get(toolName)
+	if !ok {
+		return
+	}
+	tracker, ok := tool.(roundSendTracker)
+	if !ok {
+		return
+	}
+	tracker.ResetSentInRound(roundID)
+}
+
+func didAnyRoundSendTrackerSend(agent *AgentInstance, roundID string, toolNames ...string) bool {
+	if agent == nil {
+		return false
+	}
+	for _, toolName := range toolNames {
+		tool, ok := agent.Tools.Get(toolName)
+		if !ok {
+			continue
+		}
+		tracker, ok := tool.(roundSendTracker)
+		if ok && tracker.HasSentInRound(roundID) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldSuppressPostSendAck(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+
+	normalized := strings.ToLower(trimmed)
+	replacer := strings.NewReplacer(
+		"。", "",
+		".", "",
+		"！", "",
+		"!", "",
+		"，", "",
+		",", "",
+		":", "",
+		"：", "",
+		"`", "",
+		"*", "",
+		" ", "",
+		"\n", "",
+		"\r", "",
+		"\t", "",
+	)
+	normalized = replacer.Replace(normalized)
+
+	switch normalized {
+	case "已发送", "发送成功", "已发出", "ok", "done", "sent", "sentsuccessfully":
+		return true
+	}
+	if strings.Contains(normalized, "已发送卡片") || strings.Contains(normalized, "卡片已发送") {
+		return true
+	}
+	return false
+}
+
+func shouldSuppressPostCardResponse(content string) bool {
+	return strings.TrimSpace(content) != ""
 }
 
 func (al *AgentLoop) processSystemMessage(
@@ -851,9 +1118,11 @@ func (al *AgentLoop) processSystemMessage(
 	sessionKey := routing.BuildAgentMainSessionKey(agent.ID)
 
 	return al.runAgentLoop(ctx, agent, processOptions{
+		RoundID:         newToolRoundID(),
 		SessionKey:      sessionKey,
 		Channel:         originChannel,
 		ChatID:          originChatID,
+		ReplyTo:         "",
 		UserMessage:     fmt.Sprintf("[System: %s] %s", msg.SenderID, msg.Content),
 		DefaultResponse: "Background task completed.",
 		EnableSummary:   false,
@@ -867,6 +1136,10 @@ func (al *AgentLoop) runAgentLoop(
 	agent *AgentInstance,
 	opts processOptions,
 ) (string, error) {
+	if strings.TrimSpace(opts.RoundID) == "" {
+		opts.RoundID = newToolRoundID()
+	}
+
 	// 0. Record last channel for heartbeat notifications (skip internal channels and cli)
 	if opts.Channel != "" && opts.ChatID != "" {
 		if !constants.IsInternalChannel(opts.Channel) {
@@ -905,16 +1178,83 @@ func (al *AgentLoop) runAgentLoop(
 	messages = resolveMediaRefs(messages, al.mediaStore, maxMediaSize)
 
 	// 2. Save user message to session
-	agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
+	if !opts.NoHistory {
+		historyUserMessage := opts.HistoryUserMessage
+		if historyUserMessage == "" {
+			historyUserMessage = opts.UserMessage
+		}
+		if strings.TrimSpace(historyUserMessage) != "" {
+			agent.Sessions.AddMessage(opts.SessionKey, "user", historyUserMessage)
+		}
+	}
 
 	// 3. Run LLM iteration loop
-	finalContent, iteration, err := al.runLLMIteration(ctx, agent, messages, opts)
+	finalContent, iteration, consumedCurrentTurn, err := al.runLLMIteration(ctx, agent, messages, opts)
 	if err != nil {
-		return "", err
+		if strings.Contains(err.Error(), "empty direct answer") {
+			logger.WarnCF("agent", "LLM returned empty direct answer; using fallback response",
+				map[string]any{
+					"agent_id":    agent.ID,
+					"session_key": opts.SessionKey,
+					"channel":     opts.Channel,
+					"chat_id":     opts.ChatID,
+				})
+			finalContent = opts.DefaultResponse
+			err = nil
+		} else {
+			return "", err
+		}
+	}
+	if consumedCurrentTurn {
+		logger.DebugCF("agent", "Current turn consumed by direct tool delivery",
+			map[string]any{
+				"agent_id":    agent.ID,
+				"session_key": opts.SessionKey,
+				"channel":     opts.Channel,
+				"chat_id":     opts.ChatID,
+				"round_id":    opts.RoundID,
+			})
+		return "", nil
 	}
 
 	// If last tool had ForUser content and we already sent it, we might not need to send final response
 	// This is controlled by the tool's Silent flag and ForUser content
+	if opts.SuppressPostCardText && didAnyRoundSendTrackerSend(agent, opts.RoundID, "message") {
+		logger.DebugCF("agent", "Suppressing final assistant text after template-card event follow-up message",
+			map[string]any{
+				"agent_id":    agent.ID,
+				"session_key": opts.SessionKey,
+				"content":     finalContent,
+			})
+		return "", nil
+	}
+	if opts.SuppressPostCardText && didAnyRoundSendTrackerSend(agent, opts.RoundID, "wecom_card") && shouldSuppressPostCardResponse(finalContent) {
+		logger.DebugCF("agent", "Suppressing post-card assistant text after direct tool delivery",
+			map[string]any{
+				"agent_id":    agent.ID,
+				"session_key": opts.SessionKey,
+				"content":     finalContent,
+			})
+		return "", nil
+	}
+	if didAnyRoundSendTrackerSend(agent, opts.RoundID, "message") && shouldSuppressPostSendAck(finalContent) {
+		logger.DebugCF("agent", "Suppressing post-send acknowledgement after direct tool delivery",
+			map[string]any{
+				"agent_id":    agent.ID,
+				"session_key": opts.SessionKey,
+				"content":     finalContent,
+			})
+		return "", nil
+	}
+	if strings.HasPrefix(opts.SessionKey, sessionKeyCronPrefix) && didAnyRoundSendTrackerSend(agent, opts.RoundID, "message") {
+		logger.DebugCF("agent", "Suppressing final assistant text after cron direct delivery",
+			map[string]any{
+				"agent_id":    agent.ID,
+				"session_key": opts.SessionKey,
+				"content":     finalContent,
+			})
+		return "", nil
+	}
 
 	// 4. Handle empty response
 	if finalContent == "" {
@@ -936,6 +1276,7 @@ func (al *AgentLoop) runAgentLoop(
 			Channel: opts.Channel,
 			ChatID:  opts.ChatID,
 			Content: finalContent,
+			ReplyTo: al.normalizeReplyToForOutbound(opts.Channel, opts.ChatID, opts.ReplyTo),
 		})
 	}
 
@@ -991,7 +1332,7 @@ func (al *AgentLoop) handleReasoning(
 		// (bus full under load, or parent canceled).  Check the error
 		// itself rather than ctx.Err(), because pubCtx may time out
 		// (5 s) while the parent ctx is still active.
-		// Also treat ErrBusClosed as expected — it occurs during normal
+		// Also treat ErrBusClosed as expected 閳?it occurs during normal
 		// shutdown when the bus is closed before all goroutines finish.
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
 			errors.Is(err, bus.ErrBusClosed) {
@@ -1014,7 +1355,7 @@ func (al *AgentLoop) runLLMIteration(
 	agent *AgentInstance,
 	messages []providers.Message,
 	opts processOptions,
-) (string, int, error) {
+) (string, int, bool, error) {
 	iteration := 0
 	var finalContent string
 
@@ -1116,7 +1457,7 @@ func (al *AgentLoop) runLLMIteration(
 
 			errMsg := strings.ToLower(err.Error())
 
-			// Check if this is a network/HTTP timeout — not a context window error.
+			// Check if this is a network/HTTP timeout 閳?not a context window error.
 			isTimeoutError := errors.Is(err, context.DeadlineExceeded) ||
 				strings.Contains(errMsg, "deadline exceeded") ||
 				strings.Contains(errMsg, "client.timeout") ||
@@ -1160,6 +1501,7 @@ func (al *AgentLoop) runLLMIteration(
 						Channel: opts.Channel,
 						ChatID:  opts.ChatID,
 						Content: "Context window exceeded. Compressing history and retrying...",
+						ReplyTo: al.normalizeReplyToForOutbound(opts.Channel, opts.ChatID, opts.ReplyTo),
 					})
 				}
 
@@ -1183,7 +1525,7 @@ func (al *AgentLoop) runLLMIteration(
 					"model":     activeModel,
 					"error":     err.Error(),
 				})
-			return "", iteration, fmt.Errorf("LLM call failed after retries: %w", err)
+			return "", iteration, false, fmt.Errorf("LLM call failed after retries: %w", err)
 		}
 
 		go al.handleReasoning(
@@ -1215,6 +1557,9 @@ func (al *AgentLoop) runLLMIteration(
 					"iteration":     iteration,
 					"content_chars": len(finalContent),
 				})
+			if finalContent == "" {
+				return "", iteration, false, fmt.Errorf("llm returned empty direct answer")
+			}
 			break
 		}
 
@@ -1276,81 +1621,95 @@ func (al *AgentLoop) runLLMIteration(
 		}
 
 		agentResults := make([]indexedAgentResult, len(normalizedToolCalls))
-		var wg sync.WaitGroup
+		executeToolCall := func(idx int, tc providers.ToolCall) {
+			agentResults[idx].tc = tc
 
-		for i, tc := range normalizedToolCalls {
-			agentResults[i].tc = tc
+			argsJSON, _ := json.Marshal(tc.Arguments)
+			argsPreview := utils.Truncate(string(argsJSON), 200)
+			logger.InfoCF("agent", fmt.Sprintf("Tool call: %s(%s)", tc.Name, argsPreview),
+				map[string]any{
+					"agent_id":  agent.ID,
+					"tool":      tc.Name,
+					"iteration": iteration,
+				})
 
-			wg.Add(1)
-			go func(idx int, tc providers.ToolCall) {
-				defer wg.Done()
-
-				argsJSON, _ := json.Marshal(tc.Arguments)
-				argsPreview := utils.Truncate(string(argsJSON), 200)
-				logger.InfoCF("agent", fmt.Sprintf("Tool call: %s(%s)", tc.Name, argsPreview),
-					map[string]any{
-						"agent_id":  agent.ID,
-						"tool":      tc.Name,
-						"iteration": iteration,
-					})
-
-				// Create async callback for tools that implement AsyncExecutor.
-				// When the background work completes, this publishes the result
-				// as an inbound system message so processSystemMessage routes it
-				// back to the user via the normal agent loop.
-				asyncCallback := func(_ context.Context, result *tools.ToolResult) {
-					// Send ForUser content directly to the user (immediate feedback),
-					// mirroring the synchronous tool execution path.
-					if !result.Silent && result.ForUser != "" {
-						outCtx, outCancel := context.WithTimeout(context.Background(), 5*time.Second)
-						defer outCancel()
-						_ = al.bus.PublishOutbound(outCtx, bus.OutboundMessage{
-							Channel: opts.Channel,
-							ChatID:  opts.ChatID,
-							Content: result.ForUser,
-						})
-					}
-
-					// Determine content for the agent loop (ForLLM or error).
-					content := result.ForLLM
-					if content == "" && result.Err != nil {
-						content = result.Err.Error()
-					}
-					if content == "" {
-						return
-					}
-
-					logger.InfoCF("agent", "Async tool completed, publishing result",
-						map[string]any{
-							"tool":        tc.Name,
-							"content_len": len(content),
-							"channel":     opts.Channel,
-						})
-
-					pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer pubCancel()
-					_ = al.bus.PublishInbound(pubCtx, bus.InboundMessage{
-						Channel:  "system",
-						SenderID: fmt.Sprintf("async:%s", tc.Name),
-						ChatID:   fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
-						Content:  content,
+			// Create async callback for tools that implement AsyncExecutor.
+			// When the background work completes, this publishes the result
+			// as an inbound system message so processSystemMessage routes it
+			// back to the user via the normal agent loop.
+			asyncCallback := func(_ context.Context, result *tools.ToolResult) {
+				// Send ForUser content directly to the user (immediate feedback),
+				// mirroring the synchronous tool execution path.
+				if !result.Silent && result.ForUser != "" {
+					outCtx, outCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer outCancel()
+					_ = al.bus.PublishOutbound(outCtx, bus.OutboundMessage{
+						Channel: opts.Channel,
+						ChatID:  opts.ChatID,
+						Content: result.ForUser,
+						ReplyTo: al.normalizeReplyToForOutbound(opts.Channel, opts.ChatID, opts.ReplyTo),
 					})
 				}
 
-				toolResult := agent.Tools.ExecuteWithContext(
-					ctx,
-					tc.Name,
-					tc.Arguments,
-					opts.Channel,
-					opts.ChatID,
-					asyncCallback,
-				)
-				agentResults[idx].result = toolResult
-			}(i, tc)
+				// Determine content for the agent loop (ForLLM or error).
+				content := result.ForLLM
+				if content == "" && result.Err != nil {
+					content = result.Err.Error()
+				}
+				if content == "" {
+					return
+				}
+
+				logger.InfoCF("agent", "Async tool completed, publishing result",
+					map[string]any{
+						"tool":        tc.Name,
+						"content_len": len(content),
+						"channel":     opts.Channel,
+					})
+
+				pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer pubCancel()
+				_ = al.bus.PublishInbound(pubCtx, bus.InboundMessage{
+					Channel:  "system",
+					SenderID: fmt.Sprintf("async:%s", tc.Name),
+					ChatID:   fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
+					Content:  content,
+				})
+			}
+
+			toolCtx := tools.WithToolUserMessage(
+				tools.WithToolRoundID(ctx, opts.RoundID),
+				opts.UserMessage,
+			)
+			agentResults[idx].result = agent.Tools.ExecuteWithContext(
+				toolCtx,
+				tc.Name,
+				tc.Arguments,
+				opts.Channel,
+				opts.ChatID,
+				opts.ReplyTo,
+				asyncCallback,
+			)
 		}
-		wg.Wait()
+
+		if shouldExecuteToolCallsSequentially(normalizedToolCalls) {
+			for i, tc := range normalizedToolCalls {
+				executeToolCall(i, tc)
+			}
+		} else {
+			var wg sync.WaitGroup
+			for i, tc := range normalizedToolCalls {
+				wg.Add(1)
+				go func(idx int, tc providers.ToolCall) {
+					defer wg.Done()
+					executeToolCall(idx, tc)
+				}(i, tc)
+			}
+			wg.Wait()
+		}
 
 		// Process results in original order (send to user, save to session)
+		consumesCurrentTurn := false
 		for _, r := range agentResults {
 			// Send ForUser content to user immediately if not Silent
 			if !r.result.Silent && r.result.ForUser != "" && opts.SendResponse {
@@ -1358,6 +1717,7 @@ func (al *AgentLoop) runLLMIteration(
 					Channel: opts.Channel,
 					ChatID:  opts.ChatID,
 					Content: r.result.ForUser,
+					ReplyTo: al.normalizeReplyToForOutbound(opts.Channel, opts.ChatID, opts.ReplyTo),
 				})
 				logger.DebugCF("agent", "Sent tool result to user",
 					map[string]any{
@@ -1402,6 +1762,9 @@ func (al *AgentLoop) runLLMIteration(
 
 			// Save tool result message to session
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
+			if r.result.ConsumesCurrentTurn {
+				consumesCurrentTurn = true
+			}
 		}
 
 		// Tick down TTL of discovered tools after processing tool results.
@@ -1414,9 +1777,12 @@ func (al *AgentLoop) runLLMIteration(
 		logger.DebugCF("agent", "TTL tick after tool execution", map[string]any{
 			"agent_id": agent.ID, "iteration": iteration,
 		})
+		if consumesCurrentTurn {
+			return "", iteration, true, nil
+		}
 	}
 
-	return finalContent, iteration, nil
+	return finalContent, iteration, false, nil
 }
 
 // selectCandidates returns the model candidates and resolved model name to use
@@ -1425,7 +1791,7 @@ func (al *AgentLoop) runLLMIteration(
 // candidates instead of the primary ones.
 //
 // The returned (candidates, model) pair is used for all LLM calls within one
-// turn — tool follow-up iterations use the same tier as the initial call so
+// turn 閳?tool follow-up iterations use the same tier as the initial call so
 // that a multi-step tool chain doesn't switch models mid-way.
 func (al *AgentLoop) selectCandidates(
 	agent *AgentInstance,
@@ -1881,7 +2247,7 @@ func (al *AgentLoop) handleCommand(
 			return commandReply, true
 		}
 		return "", true
-	default: // OutcomePassthrough — let the message fall through to LLM
+	default: // OutcomePassthrough 閳?let the message fall through to LLM
 		return "", false
 	}
 }

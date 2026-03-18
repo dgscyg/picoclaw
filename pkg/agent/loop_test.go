@@ -52,6 +52,38 @@ func (r *recordingProvider) GetDefaultModel() string {
 	return "mock-model"
 }
 
+type fakeReplyReuseChannel struct {
+	fakeChannel
+	canReuse bool
+}
+
+func (f *fakeReplyReuseChannel) CanReuseReply(chatID, replyTo string) bool { return f.canReuse }
+
+type fakeWeComSendChannel struct {
+	fakeReplyReuseChannel
+	sends []bus.OutboundMessage
+}
+
+func (f *fakeWeComSendChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	f.sends = append(f.sends, msg)
+	return nil
+}
+
+type fakeSelectiveWeComSendChannel struct {
+	fakeChannel
+	reusableChatID string
+	sends          []bus.OutboundMessage
+}
+
+func (f *fakeSelectiveWeComSendChannel) CanReuseReply(chatID, replyTo string) bool {
+	return chatID == f.reusableChatID && replyTo != ""
+}
+
+func (f *fakeSelectiveWeComSendChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	f.sends = append(f.sends, msg)
+	return nil
+}
+
 func newTestAgentLoop(
 	t *testing.T,
 ) (al *AgentLoop, cfg *config.Config, msgBus *bus.MessageBus, provider *mockProvider, cleanup func()) {
@@ -250,10 +282,232 @@ func TestToolContext_Updates(t *testing.T) {
 	if got := tools.ToolChatID(ctx); got != "chat-42" {
 		t.Errorf("expected chatID 'chat-42', got %q", got)
 	}
+	if got := tools.ToolReplyTo(ctx); got != "" {
+		t.Errorf("expected empty replyTo, got %q", got)
+	}
 
 	// Empty context returns empty strings
 	if got := tools.ToolChannel(context.Background()); got != "" {
 		t.Errorf("expected empty channel from bare context, got %q", got)
+	}
+}
+
+func TestShouldSuppressPostSendAck(t *testing.T) {
+	tests := []struct {
+		content string
+		want    bool
+	}{
+		{content: "已发送。", want: true},
+		{content: "发送成功", want: true},
+		{content: "sent", want: true},
+		{content: "Sent successfully.", want: true},
+		{content: "这里是详细解释", want: false},
+		{content: "", want: false},
+	}
+
+	for _, tt := range tests {
+		if got := shouldSuppressPostSendAck(tt.content); got != tt.want {
+			t.Fatalf("shouldSuppressPostSendAck(%q) = %v, want %v", tt.content, got, tt.want)
+		}
+	}
+}
+
+func TestShouldSuppressPostCardResponse(t *testing.T) {
+	tests := []struct {
+		content string
+		want    bool
+	}{
+		{content: "已发送。", want: true},
+		{content: "这里是详细解释", want: true},
+		{content: "", want: false},
+		{content: "   ", want: false},
+	}
+
+	for _, tt := range tests {
+		if got := shouldSuppressPostCardResponse(tt.content); got != tt.want {
+			t.Fatalf("shouldSuppressPostCardResponse(%q) = %v, want %v", tt.content, got, tt.want)
+		}
+	}
+}
+
+func TestNormalizeReplyToForOutbound_WeComOfficialClearsExpiredReply(t *testing.T) {
+	al, _, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	chManager, err := channels.NewManager(&config.Config{}, bus.NewMessageBus(), nil)
+	if err != nil {
+		t.Fatalf("Failed to create channel manager: %v", err)
+	}
+	chManager.RegisterChannel("wecom_official", &fakeReplyReuseChannel{
+		fakeChannel: fakeChannel{id: "rid-wecom-official"},
+		canReuse:    false,
+	})
+	al.SetChannelManager(chManager)
+
+	if got := al.normalizeReplyToForOutbound("wecom_official", "YangXu", "reply-1"); got != "" {
+		t.Fatalf("normalizeReplyToForOutbound() = %q, want empty replyTo", got)
+	}
+}
+
+func TestNormalizeReplyToForOutbound_WeComOfficialKeepsActiveReply(t *testing.T) {
+	al, _, _, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	chManager, err := channels.NewManager(&config.Config{}, bus.NewMessageBus(), nil)
+	if err != nil {
+		t.Fatalf("Failed to create channel manager: %v", err)
+	}
+	chManager.RegisterChannel("wecom_official", &fakeReplyReuseChannel{
+		fakeChannel: fakeChannel{id: "rid-wecom-official"},
+		canReuse:    true,
+	})
+	al.SetChannelManager(chManager)
+
+	if got := al.normalizeReplyToForOutbound("wecom_official", "YangXu", "reply-1"); got != "reply-1" {
+		t.Fatalf("normalizeReplyToForOutbound() = %q, want %q", got, "reply-1")
+	}
+}
+
+func TestAgentLoopRun_PropagatesReplyToToOutbound(t *testing.T) {
+	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- al.Run(runCtx)
+	}()
+	defer func() {
+		runCancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for agent loop to stop")
+		}
+	}()
+
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pubCancel()
+
+	err := msgBus.PublishInbound(pubCtx, bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:user-9",
+		ChatID:   "user-9",
+		Content:  "hello",
+		Metadata: map[string]string{
+			"reply_to": "callback-req-9",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	outCtx, outCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer outCancel()
+
+	msg, ok := msgBus.SubscribeOutbound(outCtx)
+	if !ok {
+		t.Fatal("expected outbound message")
+	}
+	if got, want := msg.Content, "Mock response"; got != want {
+		t.Fatalf("Content = %q, want %q", got, want)
+	}
+	if got, want := msg.ReplyTo, "callback-req-9"; got != want {
+		t.Fatalf("ReplyTo = %q, want %q", got, want)
+	}
+}
+
+func TestAgentLoopRun_PublishesDirectOutboundForTemplateCardEvent(t *testing.T) {
+	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- al.Run(runCtx)
+	}()
+	defer func() {
+		runCancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for agent loop to stop")
+		}
+	}()
+
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pubCancel()
+	err := msgBus.PublishInbound(pubCtx, bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:user-10",
+		ChatID:   "user-10",
+		Content:  "Template card event triggered.",
+		Metadata: map[string]string{
+			"event_type": "template_card_event",
+			"reply_to":   "callback-event-10",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	outCtx, outCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer outCancel()
+	msg, ok := msgBus.SubscribeOutbound(outCtx)
+	if !ok {
+		t.Fatal("expected outbound follow-up message for template card event")
+	}
+	if got, want := msg.Content, "Mock response"; got != want {
+		t.Fatalf("Content = %q, want %q", got, want)
+	}
+	if got, want := msg.ReplyTo, "callback-event-10"; got != want {
+		t.Fatalf("ReplyTo = %q, want %q", got, want)
+	}
+}
+
+func TestAgentLoopRun_EmptyDirectAnswerUsesNeutralFallback(t *testing.T) {
+	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	defaultAgent.Provider = &simpleMockProvider{response: ""}
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- al.Run(runCtx)
+	}()
+	defer func() {
+		runCancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for agent loop to stop")
+		}
+	}()
+
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pubCancel()
+
+	err := msgBus.PublishInbound(pubCtx, bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:user-empty",
+		ChatID:   "user-empty",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	outCtx, outCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer outCancel()
+
+	msg, ok := msgBus.SubscribeOutbound(outCtx)
+	if !ok {
+		t.Fatal("expected outbound message")
+	}
+	if got, want := msg.Content, defaultResponse; got != want {
+		t.Fatalf("Content = %q, want %q", got, want)
 	}
 }
 
@@ -417,6 +671,132 @@ func (m *countingMockProvider) GetDefaultModel() string {
 	return "counting-mock-model"
 }
 
+type orderedToolCallsProvider struct {
+	calls int
+}
+
+func (m *orderedToolCallsProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	defer func() { m.calls++ }()
+	if m.calls == 0 {
+		return &providers.LLMResponse{
+			ToolCalls: []providers.ToolCall{
+				{ID: "call-1", Type: "function", Name: "message", Arguments: map[string]any{"content": "3"}},
+				{ID: "call-2", Type: "function", Name: "message", Arguments: map[string]any{"content": "2"}},
+				{ID: "call-3", Type: "function", Name: "message", Arguments: map[string]any{"content": "1"}},
+			},
+		}, nil
+	}
+	return &providers.LLMResponse{
+		Content:   "已发送。",
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (m *orderedToolCallsProvider) GetDefaultModel() string {
+	return "ordered-tool-calls-mock-model"
+}
+
+type cronMessageThenNarrateProvider struct {
+	calls int
+}
+
+func (m *cronMessageThenNarrateProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	defer func() { m.calls++ }()
+	if m.calls == 0 {
+		return &providers.LLMResponse{
+			ToolCalls: []providers.ToolCall{
+				{ID: "call-1", Type: "function", Name: "message", Arguments: map[string]any{"content": "status report"}},
+			},
+		}, nil
+	}
+	return &providers.LLMResponse{
+		Content:   "看起来你的消息可能没有发送完整，我只看到了一个思考标签。",
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (m *cronMessageThenNarrateProvider) GetDefaultModel() string {
+	return "cron-message-then-narrate-mock-model"
+}
+
+type currentConversationMessageThenNarrateProvider struct {
+	calls int
+}
+
+func (m *currentConversationMessageThenNarrateProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	defer func() { m.calls++ }()
+	if m.calls == 0 {
+		return &providers.LLMResponse{
+			ToolCalls: []providers.ToolCall{
+				{ID: "call-1", Type: "function", Name: "message", Arguments: map[string]any{"content": "status report"}},
+			},
+		}, nil
+	}
+	return &providers.LLMResponse{
+		Content:   "看起来你的消息可能没有发送完整，我只看到了一个思考标签。",
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (m *currentConversationMessageThenNarrateProvider) GetDefaultModel() string {
+	return "current-conversation-message-then-narrate-mock-model"
+}
+
+type crossTargetMessageThenAckProvider struct {
+	calls int
+}
+
+func (m *crossTargetMessageThenAckProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	defer func() { m.calls++ }()
+	if m.calls == 0 {
+		return &providers.LLMResponse{
+			ToolCalls: []providers.ToolCall{
+				{
+					ID:   "call-1",
+					Type: "function",
+					Name: "message",
+					Arguments: map[string]any{
+						"chat_id": "WangCheng",
+						"content": "任务进度",
+					},
+				},
+			},
+		}, nil
+	}
+	return &providers.LLMResponse{
+		Content:   "✅ **消息已成功发送给 WangCheng！**",
+		ToolCalls: []providers.ToolCall{},
+	}, nil
+}
+
+func (m *crossTargetMessageThenAckProvider) GetDefaultModel() string {
+	return "cross-target-message-then-ack-mock-model"
+}
+
 // mockCustomTool is a simple mock tool for registration testing
 type mockCustomTool struct{}
 
@@ -511,6 +891,525 @@ func TestProcessMessage_UsesRouteSessionKey(t *testing.T) {
 	}
 	if history[0].Role != "user" || history[0].Content != "hello" {
 		t.Fatalf("unexpected first message in session: %+v", history[0])
+	}
+}
+
+func TestProcessMessage_UsesExplicitSessionKey(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &simpleMockProvider{response: "ok"}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	msg := bus.InboundMessage{
+		Channel:    "wecom_official",
+		SenderID:   "cron",
+		ChatID:     "YangXu",
+		Content:    "scheduled status query",
+		SessionKey: "cron-job-42",
+	}
+
+	route := al.registry.ResolveRoute(routing.RouteInput{
+		Channel: msg.Channel,
+		Peer:    extractPeer(msg),
+	})
+
+	helper := testHelper{al: al}
+	_ = helper.executeAndGetResponse(t, context.Background(), msg)
+
+	explicitHistory := al.registry.GetDefaultAgent().Sessions.GetHistory("cron-job-42")
+	if len(explicitHistory) != 2 {
+		t.Fatalf("expected explicit session history len=2, got %d", len(explicitHistory))
+	}
+	if got, want := explicitHistory[0].Content, "scheduled status query"; got != want {
+		t.Fatalf("explicit history first user message = %q, want %q", got, want)
+	}
+
+	routeHistory := al.registry.GetDefaultAgent().Sessions.GetHistory(route.SessionKey)
+	if len(routeHistory) != 0 {
+		t.Fatalf("expected route session %q to remain empty, got %d messages", route.SessionKey, len(routeHistory))
+	}
+}
+
+func TestProcessMessage_TemplateCardEventStoresSanitizedHistory(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &simpleMockProvider{response: "ok"}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	msg := bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:YangXu",
+		ChatID:   "YangXu",
+		Content:  `User clicked template card action: 开启空调. Equivalent user instruction: "开启空调". Treat this as a confirmed user request.`,
+		Metadata: map[string]string{
+			"event_type":        "template_card_event",
+			"event_action_text": "开启空调",
+			"reply_to":          "callback-event-1",
+		},
+		Peer: bus.Peer{Kind: "direct", ID: "YangXu"},
+	}
+
+	helper := testHelper{al: al}
+	_ = helper.executeAndGetResponse(t, context.Background(), msg)
+
+	route := al.registry.ResolveRoute(routing.RouteInput{
+		Channel: msg.Channel,
+		Peer:    extractPeer(msg),
+	})
+	history := al.registry.GetDefaultAgent().Sessions.GetHistory(route.SessionKey)
+	if len(history) < 1 {
+		t.Fatal("expected history to contain at least the sanitized user message")
+	}
+	if got, want := history[0].Content, "User clicked template card action: 开启空调."; got != want {
+		t.Fatalf("history[0].Content = %q, want %q", got, want)
+	}
+}
+
+func TestUserMessageForInbound_TemplateCardEventUsesMetadataContext(t *testing.T) {
+	msg := bus.InboundMessage{
+		Content: "Template card event triggered. Do not call `wecom_card` again for this event.",
+		Metadata: map[string]string{
+			"event_type":        "template_card_event",
+			"event_action_text": "开启空调",
+			"event_key":         "turn_on_ac",
+			"card_context":      "设备ID=6872176FF500, 会议室空调状态监控",
+		},
+	}
+
+	got := userMessageForInbound(msg)
+	want := "User clicked template card action: 开启空调. Card context: 设备ID=6872176FF500, 会议室空调状态监控."
+	if got != want {
+		t.Fatalf("userMessageForInbound() = %q, want %q", got, want)
+	}
+}
+
+func TestProcessMessage_MultipleWeComMessageToolCallsStayOrdered(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &orderedToolCallsProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	messageTool := tools.NewMessageTool()
+	messageTool.SetSendCallback(al.sendToolMessage)
+	al.RegisterTool(messageTool)
+
+	chManager, err := channels.NewManager(&config.Config{}, bus.NewMessageBus(), nil)
+	if err != nil {
+		t.Fatalf("Failed to create channel manager: %v", err)
+	}
+	sendChannel := &fakeWeComSendChannel{
+		fakeReplyReuseChannel: fakeReplyReuseChannel{
+			fakeChannel: fakeChannel{id: "rid-wecom-official"},
+			canReuse:    true,
+		},
+	}
+	chManager.RegisterChannel("wecom_official", sendChannel)
+	al.SetChannelManager(chManager)
+
+	msg := bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:YangXu",
+		ChatID:   "YangXu",
+		Content:  "给我发送三条消息，内容分别是 3 2 1",
+		Metadata: map[string]string{
+			"reply_to": "callback-msg-1",
+		},
+		Peer: bus.Peer{Kind: "direct", ID: "YangXu"},
+	}
+
+	helper := testHelper{al: al}
+	response := helper.executeAndGetResponse(t, context.Background(), msg)
+	if response != "" {
+		t.Fatalf("expected suppressed final ack, got %q", response)
+	}
+	if len(sendChannel.sends) != 3 {
+		t.Fatalf("expected 3 sends, got %d", len(sendChannel.sends))
+	}
+	if got, want := sendChannel.sends[0].Content, "3"; got != want {
+		t.Fatalf("send[0].Content = %q, want %q", got, want)
+	}
+	if got, want := sendChannel.sends[1].Content, "2"; got != want {
+		t.Fatalf("send[1].Content = %q, want %q", got, want)
+	}
+	if got, want := sendChannel.sends[2].Content, "1"; got != want {
+		t.Fatalf("send[2].Content = %q, want %q", got, want)
+	}
+	if got, want := sendChannel.sends[0].ReplyTo, "callback-msg-1"; got != want {
+		t.Fatalf("send[0].ReplyTo = %q, want %q", got, want)
+	}
+	if got := sendChannel.sends[1].ReplyTo; got != "" {
+		t.Fatalf("send[1].ReplyTo = %q, want empty", got)
+	}
+	if got := sendChannel.sends[2].ReplyTo; got != "" {
+		t.Fatalf("send[2].ReplyTo = %q, want empty", got)
+	}
+}
+
+func TestAgentLoopRun_CrossTargetMessageDoesNotSuppressCurrentReply(t *testing.T) {
+	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("No default agent found")
+	}
+	defaultAgent.Provider = &crossTargetMessageThenAckProvider{}
+	messageTool := tools.NewMessageTool()
+	messageTool.SetSendCallback(al.sendToolMessage)
+	al.RegisterTool(messageTool)
+
+	chManager, err := channels.NewManager(&config.Config{}, bus.NewMessageBus(), nil)
+	if err != nil {
+		t.Fatalf("Failed to create channel manager: %v", err)
+	}
+	sendChannel := &fakeSelectiveWeComSendChannel{
+		fakeChannel:    fakeChannel{id: "rid-wecom-official"},
+		reusableChatID: "dragonsss",
+	}
+	chManager.RegisterChannel("wecom_official", sendChannel)
+	al.SetChannelManager(chManager)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- al.Run(runCtx)
+	}()
+	defer func() {
+		runCancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for agent loop to stop")
+		}
+	}()
+
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pubCancel()
+	err = msgBus.PublishInbound(pubCtx, bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:dragonsss",
+		ChatID:   "dragonsss",
+		Content:  `通知 chat_id 是：WangCheng 的用户，"任务进度"`,
+		Metadata: map[string]string{
+			"reply_to": "callback-dragonsss-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	outCtx, outCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer outCancel()
+	msg, ok := msgBus.SubscribeOutbound(outCtx)
+	if !ok {
+		t.Fatal("expected outbound response for current conversation")
+	}
+	if got, want := msg.ChatID, "dragonsss"; got != want {
+		t.Fatalf("outbound chatID = %q, want %q", got, want)
+	}
+	if got, want := msg.Content, "✅ **消息已成功发送给 WangCheng！**"; got != want {
+		t.Fatalf("outbound content = %q, want %q", got, want)
+	}
+	if got, want := msg.ReplyTo, "callback-dragonsss-1"; got != want {
+		t.Fatalf("outbound replyTo = %q, want %q", got, want)
+	}
+
+	if len(sendChannel.sends) != 1 {
+		t.Fatalf("expected exactly one cross-target direct send, got %d", len(sendChannel.sends))
+	}
+	if got, want := sendChannel.sends[0].ChatID, "WangCheng"; got != want {
+		t.Fatalf("cross-target chatID = %q, want %q", got, want)
+	}
+	if got, want := sendChannel.sends[0].Content, "任务进度"; got != want {
+		t.Fatalf("cross-target content = %q, want %q", got, want)
+	}
+	if got := sendChannel.sends[0].ReplyTo; got != "" {
+		t.Fatalf("cross-target replyTo = %q, want empty", got)
+	}
+}
+
+func TestAgentLoopRun_NextRoundDirectReplyNotSuppressedByPreviousCrossTargetSend(t *testing.T) {
+	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("No default agent found")
+	}
+	defaultAgent.Provider = &crossTargetMessageThenAckProvider{}
+	messageTool := tools.NewMessageTool()
+	messageTool.SetSendCallback(al.sendToolMessage)
+	al.RegisterTool(messageTool)
+
+	chManager, err := channels.NewManager(&config.Config{}, bus.NewMessageBus(), nil)
+	if err != nil {
+		t.Fatalf("Failed to create channel manager: %v", err)
+	}
+	sendChannel := &fakeSelectiveWeComSendChannel{
+		fakeChannel:    fakeChannel{id: "rid-wecom-official"},
+		reusableChatID: "dragonsss",
+	}
+	chManager.RegisterChannel("wecom_official", sendChannel)
+	al.SetChannelManager(chManager)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- al.Run(runCtx)
+	}()
+	defer func() {
+		runCancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for agent loop to stop")
+		}
+	}()
+
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pubCancel()
+	err = msgBus.PublishInbound(pubCtx, bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:dragonsss",
+		ChatID:   "dragonsss",
+		Content:  `通知 chat_id 是：WangCheng 的用户，"任务进度"`,
+		Metadata: map[string]string{
+			"reply_to": "callback-dragonsss-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("first PublishInbound() error = %v", err)
+	}
+
+	outCtx, outCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer outCancel()
+	firstMsg, ok := msgBus.SubscribeOutbound(outCtx)
+	if !ok {
+		t.Fatal("expected first outbound response")
+	}
+	if got, want := firstMsg.Content, "✅ **消息已成功发送给 WangCheng！**"; got != want {
+		t.Fatalf("first outbound content = %q, want %q", got, want)
+	}
+
+	err = msgBus.PublishInbound(pubCtx, bus.InboundMessage{
+		Channel:  "wecom_official",
+		SenderID: "wecom_official:dragonsss",
+		ChatID:   "dragonsss",
+		Content:  "继续说",
+		Metadata: map[string]string{
+			"reply_to": "callback-dragonsss-2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("second PublishInbound() error = %v", err)
+	}
+
+	secondMsg, ok := msgBus.SubscribeOutbound(outCtx)
+	if !ok {
+		t.Fatal("expected second outbound response")
+	}
+	if got, want := secondMsg.Content, "✅ **消息已成功发送给 WangCheng！**"; got != want {
+		t.Fatalf("second outbound content = %q, want %q", got, want)
+	}
+	if got, want := secondMsg.ReplyTo, "callback-dragonsss-2"; got != want {
+		t.Fatalf("second outbound replyTo = %q, want %q", got, want)
+	}
+}
+
+func TestAgentLoopRun_CurrentConversationMessageConsumesTurn(t *testing.T) {
+	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("No default agent found")
+	}
+	defaultAgent.Provider = &currentConversationMessageThenNarrateProvider{}
+	messageTool := tools.NewMessageTool()
+	messageTool.SetSendCallback(al.sendToolMessage)
+	al.RegisterTool(messageTool)
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- al.Run(runCtx)
+	}()
+	defer func() {
+		runCancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for agent loop to stop")
+		}
+	}()
+
+	peer := bus.Peer{Kind: "direct", ID: "user-guest-a"}
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer pubCancel()
+	err := msgBus.PublishInbound(pubCtx, bus.InboundMessage{
+		Channel:  "claweb",
+		SenderID: "claweb:user-guest-a",
+		ChatID:   "claweb:client:guest-a:user:user-guest-a",
+		Content:  "你记忆中的番茄有哪些信息",
+		Peer:     peer,
+	})
+	if err != nil {
+		t.Fatalf("PublishInbound() error = %v", err)
+	}
+
+	outCtx, outCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer outCancel()
+	firstMsg, ok := msgBus.SubscribeOutbound(outCtx)
+	if !ok {
+		t.Fatal("expected direct message tool outbound")
+	}
+	if got, want := firstMsg.Channel, "claweb"; got != want {
+		t.Fatalf("first outbound channel = %q, want %q", got, want)
+	}
+	if got, want := firstMsg.ChatID, "claweb:client:guest-a:user:user-guest-a"; got != want {
+		t.Fatalf("first outbound chatID = %q, want %q", got, want)
+	}
+	if got, want := firstMsg.Content, "status report"; got != want {
+		t.Fatalf("first outbound content = %q, want %q", got, want)
+	}
+
+	noMoreCtx, noMoreCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer noMoreCancel()
+	if msg, ok := msgBus.SubscribeOutbound(noMoreCtx); ok {
+		t.Fatalf("expected no second outbound response, got %+v", msg)
+	}
+
+	route := al.registry.ResolveRoute(routing.RouteInput{
+		Channel: "claweb",
+		Peer: &routing.RoutePeer{
+			Kind: peer.Kind,
+			ID:   peer.ID,
+		},
+	})
+	history := defaultAgent.Sessions.GetHistory(route.SessionKey)
+	for _, entry := range history {
+		if entry.Role == "assistant" && strings.Contains(entry.Content, "思考标签") {
+			t.Fatalf("unexpected follow-up narration saved in history: %+v", entry)
+		}
+	}
+}
+
+func TestProcessDirectWithChannel_CronSuppressesPostMessageNarration(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &cronMessageThenNarrateProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	messageTool := tools.NewMessageTool()
+	messageTool.SetSendCallback(al.sendToolMessage)
+	al.RegisterTool(messageTool)
+
+	chManager, err := channels.NewManager(&config.Config{}, bus.NewMessageBus(), nil)
+	if err != nil {
+		t.Fatalf("Failed to create channel manager: %v", err)
+	}
+	sendChannel := &fakeWeComSendChannel{
+		fakeReplyReuseChannel: fakeReplyReuseChannel{
+			fakeChannel: fakeChannel{id: "rid-wecom-official"},
+			canReuse:    true,
+		},
+	}
+	chManager.RegisterChannel("wecom_official", sendChannel)
+	al.SetChannelManager(chManager)
+
+	response, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"查询空调设备状态并报告",
+		"cron-job-99",
+		"wecom_official",
+		"YangXu",
+	)
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error = %v", err)
+	}
+	if response != "" {
+		t.Fatalf("expected cron follow-up narration to be suppressed, got %q", response)
+	}
+	if len(sendChannel.sends) != 1 {
+		t.Fatalf("expected 1 direct send, got %d", len(sendChannel.sends))
+	}
+	if got, want := sendChannel.sends[0].Content, "status report"; got != want {
+		t.Fatalf("send[0].Content = %q, want %q", got, want)
+	}
+
+	history := al.registry.GetDefaultAgent().Sessions.GetHistory("cron-job-99")
+	if len(history) == 0 {
+		t.Fatal("expected cron session history to exist")
+	}
+	if got, want := history[0].Role, "user"; got != want {
+		t.Fatalf("history[0].Role = %q, want %q", got, want)
+	}
+	for _, entry := range history {
+		if entry.Role == "assistant" && strings.Contains(entry.Content, "思考标签") {
+			t.Fatalf("unexpected cron narration saved in history: %+v", entry)
+		}
 	}
 }
 

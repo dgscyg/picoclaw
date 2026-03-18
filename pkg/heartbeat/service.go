@@ -26,6 +26,8 @@ import (
 const (
 	minIntervalMinutes     = 5
 	defaultIntervalMinutes = 30
+	startupDelayCap        = 30 * time.Second
+	recentActivityGrace    = 15 * time.Second
 )
 
 // HeartbeatHandler is the function type for handling heartbeat.
@@ -41,6 +43,7 @@ type HeartbeatService struct {
 	handler   HeartbeatHandler
 	interval  time.Duration
 	enabled   bool
+	startedAt time.Time
 	mu        sync.RWMutex
 	stopChan  chan struct{}
 }
@@ -94,6 +97,7 @@ func (hs *HeartbeatService) Start() error {
 	}
 
 	hs.stopChan = make(chan struct{})
+	hs.startedAt = time.Now()
 	go hs.runLoop(hs.stopChan)
 
 	logger.InfoCF("heartbeat", "Heartbeat service started", map[string]any{
@@ -115,6 +119,7 @@ func (hs *HeartbeatService) Stop() {
 	logger.InfoC("heartbeat", "Stopping heartbeat service")
 	close(hs.stopChan)
 	hs.stopChan = nil
+	hs.startedAt = time.Time{}
 }
 
 // IsRunning returns whether the service is running
@@ -129,15 +134,19 @@ func (hs *HeartbeatService) runLoop(stopChan chan struct{}) {
 	ticker := time.NewTicker(hs.interval)
 	defer ticker.Stop()
 
-	// Run first heartbeat after initial delay
-	time.AfterFunc(time.Second, func() {
-		hs.executeHeartbeat()
-	})
+	firstDelay := hs.interval
+	if firstDelay > startupDelayCap {
+		firstDelay = startupDelayCap
+	}
+	startupTimer := time.NewTimer(firstDelay)
+	defer startupTimer.Stop()
 
 	for {
 		select {
 		case <-stopChan:
 			return
+		case <-startupTimer.C:
+			hs.executeHeartbeat()
 		case <-ticker.C:
 			hs.executeHeartbeat()
 		}
@@ -172,12 +181,10 @@ func (hs *HeartbeatService) executeHeartbeat() {
 		return
 	}
 
-	// Get last channel info for context
-	lastChannel := hs.state.GetLastChannel()
-	channel, chatID := hs.parseLastChannel(lastChannel)
-
-	// Debug log for channel resolution
-	hs.logInfof("Resolved channel: %s, chatID: %s (from lastChannel: %s)", channel, chatID, lastChannel)
+	channel, chatID, ok := hs.resolveTarget()
+	if !ok {
+		return
+	}
 
 	result := handler(prompt, channel, chatID)
 
@@ -215,6 +222,35 @@ func (hs *HeartbeatService) executeHeartbeat() {
 	}
 
 	hs.logInfof("Heartbeat completed: %s", result.ForLLM)
+}
+
+func (hs *HeartbeatService) resolveTarget() (channel, chatID string, ok bool) {
+	lastChannel := hs.state.GetLastChannel()
+	if lastChannel == "" {
+		hs.logInfof("Skipping heartbeat: no last external channel recorded")
+		return "", "", false
+	}
+
+	channel, chatID = hs.parseLastChannel(lastChannel)
+	if channel == "" || chatID == "" {
+		hs.logInfof("Skipping heartbeat: invalid or internal last channel: %s", lastChannel)
+		return "", "", false
+	}
+
+	lastActivity := hs.state.GetTimestamp()
+	hs.mu.RLock()
+	startedAt := hs.startedAt
+	hs.mu.RUnlock()
+	if !startedAt.IsZero() && lastActivity.After(startedAt) && time.Since(lastActivity) < recentActivityGrace {
+		hs.logInfof(
+			"Skipping heartbeat: recent user activity detected (%s ago)",
+			time.Since(lastActivity).Round(time.Second),
+		)
+		return "", "", false
+	}
+
+	hs.logInfof("Resolved channel: %s, chatID: %s (from lastChannel: %s)", channel, chatID, lastChannel)
+	return channel, chatID, true
 }
 
 // buildPrompt builds the heartbeat prompt from HEARTBEAT.md
