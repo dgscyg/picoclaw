@@ -146,6 +146,128 @@ func TestClawebSendUsesReplyToAsFrameID(t *testing.T) {
 	}
 }
 
+func TestClawebSend_SuppressesDuplicateAssistantFrameForSameTurn(t *testing.T) {
+	t.Parallel()
+
+	msgBus := bus.NewMessageBus()
+	ch := newStartedTestChannel(t, msgBus)
+	conn := dialTestChannel(t, ch)
+	defer conn.Close()
+
+	mustWriteJSON(t, conn, clawebHelloFrame{
+		Type:     "hello",
+		Token:    "secret-token",
+		ClientID: "client-dup",
+		UserID:   "user-dup",
+	})
+
+	var ready clawebReadyFrame
+	mustReadJSON(t, conn, &ready)
+
+	chatID := buildChatID("user-dup", "", "client-dup")
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel: clawebChannelName,
+		ChatID:  chatID,
+		Content: "first reply",
+		ReplyTo: "turn-dup-1",
+	}); err != nil {
+		t.Fatalf("first Send() error = %v", err)
+	}
+	var first clawebMessageFrame
+	mustReadJSON(t, conn, &first)
+	if got, want := first.Text, "first reply"; got != want {
+		t.Fatalf("first frame.Text = %q, want %q", got, want)
+	}
+
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel: clawebChannelName,
+		ChatID:  chatID,
+		Content: "second reply should be suppressed",
+		ReplyTo: "turn-dup-1",
+	}); err != nil {
+		t.Fatalf("second Send() error = %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+	var second clawebMessageFrame
+	if err := conn.ReadJSON(&second); err == nil {
+		t.Fatalf("unexpected duplicate frame: %#v", second)
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+}
+
+func TestClawebSend_AllowsNewAssistantFrameAfterNewInboundTurn(t *testing.T) {
+	t.Parallel()
+
+	msgBus := bus.NewMessageBus()
+	ch := newStartedTestChannel(t, msgBus)
+	conn := dialTestChannel(t, ch)
+	defer conn.Close()
+
+	mustWriteJSON(t, conn, clawebHelloFrame{
+		Type:     "hello",
+		Token:    "secret-token",
+		ClientID: "client-next",
+		UserID:   "user-next",
+	})
+
+	var ready clawebReadyFrame
+	mustReadJSON(t, conn, &ready)
+
+	mustWriteJSON(t, conn, clawebMessageFrame{
+		Type: "message",
+		ID:   "turn-user-1",
+		Text: "hello",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, ok := msgBus.ConsumeInbound(ctx); !ok {
+		t.Fatal("expected inbound message")
+	}
+
+	chatID := buildChatID("user-next", "", "client-next")
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel: clawebChannelName,
+		ChatID:  chatID,
+		Content: "reply one",
+		ReplyTo: "turn-user-1",
+	}); err != nil {
+		t.Fatalf("Send() first turn error = %v", err)
+	}
+	var first clawebMessageFrame
+	mustReadJSON(t, conn, &first)
+
+	mustWriteJSON(t, conn, clawebMessageFrame{
+		Type: "message",
+		ID:   "turn-user-2",
+		Text: "hello again",
+	})
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	if _, ok := msgBus.ConsumeInbound(ctx2); !ok {
+		t.Fatal("expected second inbound message")
+	}
+
+	if err := ch.Send(context.Background(), bus.OutboundMessage{
+		Channel: clawebChannelName,
+		ChatID:  chatID,
+		Content: "reply two",
+		ReplyTo: "turn-user-2",
+	}); err != nil {
+		t.Fatalf("Send() second turn error = %v", err)
+	}
+	var second clawebMessageFrame
+	mustReadJSON(t, conn, &second)
+	if got, want := second.ID, "turn-user-2"; got != want {
+		t.Fatalf("second frame.ID = %q, want %q", got, want)
+	}
+	if got, want := second.Text, "reply two"; got != want {
+		t.Fatalf("second frame.Text = %q, want %q", got, want)
+	}
+}
+
 func TestClawebSendMediaUsesResolvedRef(t *testing.T) {
 	t.Parallel()
 

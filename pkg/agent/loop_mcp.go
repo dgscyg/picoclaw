@@ -130,6 +130,15 @@ func (al *AgentLoop) ensureMCPInitialized(ctx context.Context) error {
 						nil,
 						al.muninnForcedMCPArgs(serverName, tool),
 					)
+					if forcedArgs := al.muninnForcedMCPArgs(serverName, tool); len(forcedArgs) > 0 {
+						logger.DebugCF("agent", "Applying forced MCP tool arguments",
+							map[string]any{
+								"agent_id":    agentID,
+								"server":      serverName,
+								"tool":        tool.Name,
+								"forced_args": forcedArgs,
+							})
+					}
 
 					if al.cfg.Tools.MCP.Discovery.Enabled {
 						agent.Tools.RegisterHidden(mcpTool)

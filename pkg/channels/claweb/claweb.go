@@ -103,6 +103,8 @@ type ClawebChannel struct {
 	listenAddr  string
 	connections sync.Map
 	activeTurns sync.Map
+	lastSentMu  sync.Mutex
+	lastSentIDs map[string]string
 	connCount   atomic.Int32
 }
 
@@ -141,6 +143,7 @@ func NewClawebChannel(cfg config.ClawebConfig, messageBus *bus.MessageBus) (*Cla
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
 		},
+		lastSentIDs: make(map[string]string),
 	}, nil
 }
 
@@ -200,6 +203,9 @@ func (c *ClawebChannel) Stop(ctx context.Context) error {
 		c.connections.Delete(key)
 		return true
 	})
+	c.lastSentMu.Lock()
+	c.lastSentIDs = make(map[string]string)
+	c.lastSentMu.Unlock()
 
 	logger.InfoC("claweb", "CLAWeb channel stopped")
 	return nil
@@ -237,6 +243,13 @@ func (c *ClawebChannel) Send(ctx context.Context, msg bus.OutboundMessage) error
 	}
 
 	turnID := c.outboundTurnID(msg.ChatID, msg.ReplyTo)
+	if c.shouldSuppressDuplicateTurn(msg.ChatID, turnID) {
+		logger.InfoCF("claweb", "Suppressing duplicate assistant outbound for active turn", map[string]any{
+			"chat_id": msg.ChatID,
+			"turn_id": turnID,
+		})
+		return nil
+	}
 	frame := clawebMessageFrame{
 		Type:      "message",
 		ID:        turnID,
@@ -507,6 +520,7 @@ func (c *ClawebChannel) handleClientMessage(conn *clawebConn, raw []byte) error 
 	}
 
 	c.activeTurns.Store(conn.chatID, messageID)
+	c.markInboundTurn(conn.chatID, messageID)
 
 	logger.DebugCF("claweb", "Received message", map[string]any{
 		"conn_id":     conn.id,
@@ -518,6 +532,32 @@ func (c *ClawebChannel) handleClientMessage(conn *clawebConn, raw []byte) error 
 
 	c.HandleMessage(c.ctx, peer, messageID, conn.userID, conn.chatID, content, mediaRefs, metadata, sender)
 	return nil
+}
+
+func (c *ClawebChannel) markInboundTurn(chatID, turnID string) {
+	chatID = strings.TrimSpace(chatID)
+	turnID = strings.TrimSpace(turnID)
+	if chatID == "" || turnID == "" {
+		return
+	}
+	c.lastSentMu.Lock()
+	delete(c.lastSentIDs, chatID)
+	c.lastSentMu.Unlock()
+}
+
+func (c *ClawebChannel) shouldSuppressDuplicateTurn(chatID, turnID string) bool {
+	chatID = strings.TrimSpace(chatID)
+	turnID = strings.TrimSpace(turnID)
+	if chatID == "" || turnID == "" {
+		return false
+	}
+	c.lastSentMu.Lock()
+	defer c.lastSentMu.Unlock()
+	if prev := strings.TrimSpace(c.lastSentIDs[chatID]); prev != "" && prev == turnID {
+		return true
+	}
+	c.lastSentIDs[chatID] = turnID
+	return false
 }
 
 func (c *ClawebChannel) outboundTurnID(chatID, replyTo string) string {
