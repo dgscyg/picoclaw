@@ -181,6 +181,92 @@ func TestEnsureMuninnMCPConfigUsesOnlyAPIKey(t *testing.T) {
 	}
 }
 
+func TestEnsureMuninnMCPConfigOverwritesStaleMuninnServerURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Tools.MCP.Enabled = true
+	cfg.Tools.MCP.Servers = map[string]MCPServerConfig{
+		DefaultMuninnMCPName: {
+			Enabled: true,
+			Type:    "http",
+			URL:     "http://127.0.0.1:8475",
+			Headers: map[string]string{"Authorization": "Bearer stale"},
+		},
+	}
+	cfg.Memory.Provider = MemoryProviderMuninnDB
+	cfg.Memory.MuninnDB = &MuninnDBConfig{
+		MCPEndpoint:  "http://127.0.0.1:8750",
+		RESTEndpoint: "http://127.0.0.1:8475",
+		Vault:        "default",
+		APIKey:       "fresh-token",
+	}
+
+	EnsureMuninnMCPConfig(cfg)
+
+	server := cfg.Tools.MCP.Servers[DefaultMuninnMCPName]
+	if got := server.URL; got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("muninn MCP URL = %q, want normalized live MCP listener", got)
+	}
+	if got := server.Headers["Authorization"]; got != "Bearer fresh-token" {
+		t.Fatalf("Authorization header = %q, want refreshed token", got)
+	}
+	if got := cfg.Memory.MuninnDB.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8475" {
+		t.Fatalf("ResolvedRESTEndpoint() = %q, want REST endpoint preserved", got)
+	}
+	if !cfg.Memory.MuninnDB.HasSeparateRESTEndpoint() {
+		t.Fatal("HasSeparateRESTEndpoint() = false, want true")
+	}
+}
+
+func TestEnsureMuninnMCPConfigPreservesExistingTransportFields(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Tools.MCP.Enabled = true
+	cfg.Tools.MCP.Servers = map[string]MCPServerConfig{
+		DefaultMuninnMCPName: {
+			Enabled: true,
+			Type:    "stdio",
+			Command: "muninn-mcp",
+			Args:    []string{"--stdio"},
+			Env:     map[string]string{"MUNINN_MODE": "stdio"},
+			EnvFile: "muninn.env",
+			URL:     "http://127.0.0.1:8475",
+			Headers: map[string]string{"Authorization": "Bearer stale"},
+		},
+	}
+	cfg.Memory.Provider = MemoryProviderMuninnDB
+	cfg.Memory.MuninnDB = &MuninnDBConfig{
+		MCPEndpoint: "http://127.0.0.1:8750",
+		Vault:       "default",
+	}
+
+	EnsureMuninnMCPConfig(cfg)
+
+	server := cfg.Tools.MCP.Servers[DefaultMuninnMCPName]
+	if server.Type != "stdio" {
+		t.Fatalf("Type = %q, want stdio", server.Type)
+	}
+	if server.Command != "muninn-mcp" {
+		t.Fatalf("Command = %q, want existing command", server.Command)
+	}
+	if len(server.Args) != 1 || server.Args[0] != "--stdio" {
+		t.Fatalf("Args = %#v, want existing args", server.Args)
+	}
+	if got := server.Env["MUNINN_MODE"]; got != "stdio" {
+		t.Fatalf("Env[MUNINN_MODE] = %q, want stdio", got)
+	}
+	if server.EnvFile != "muninn.env" {
+		t.Fatalf("EnvFile = %q, want existing env file", server.EnvFile)
+	}
+	if got := server.URL; got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("muninn MCP URL = %q, want normalized endpoint", got)
+	}
+	if server.Headers != nil {
+		t.Fatalf("Headers = %#v, want nil when memory API key is empty", server.Headers)
+	}
+	if got := cfg.Memory.MuninnDB.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8750" {
+		t.Fatalf("ResolvedRESTEndpoint() = %q, want MCP base fallback", got)
+	}
+}
+
 func TestAgentModelConfig_UnmarshalString(t *testing.T) {
 	var m AgentModelConfig
 	if err := json.Unmarshal([]byte(`"gpt-4"`), &m); err != nil {

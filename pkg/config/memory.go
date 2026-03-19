@@ -121,19 +121,28 @@ func EnsureMuninnMCPConfig(cfg *Config) {
 	if cfg == nil || strings.TrimSpace(cfg.Memory.Provider) != MemoryProviderMuninnDB {
 		return
 	}
+	if cfg.Memory.MuninnDB == nil {
+		return
+	}
 	if !cfg.Tools.MCP.Enabled {
 		cfg.Tools.MCP.Enabled = true
 	}
 	if cfg.Tools.MCP.Servers == nil {
 		cfg.Tools.MCP.Servers = map[string]MCPServerConfig{}
 	}
-	if _, exists := cfg.Tools.MCP.Servers[DefaultMuninnMCPName]; exists {
-		return
-	}
 	server := MCPServerConfig{
 		Enabled: true,
 		Type:    "http",
 		URL:     cfg.Memory.MuninnDB.ResolvedMCPEndpoint(),
+	}
+	if existing, exists := cfg.Tools.MCP.Servers[DefaultMuninnMCPName]; exists {
+		server.Command = existing.Command
+		server.Args = existing.Args
+		server.Env = existing.Env
+		server.EnvFile = existing.EnvFile
+		if strings.TrimSpace(existing.Type) != "" {
+			server.Type = existing.Type
+		}
 	}
 	if token := strings.TrimSpace(cfg.Memory.MuninnDB.APIKey); token != "" {
 		server.Headers = map[string]string{"Authorization": "Bearer " + token}
