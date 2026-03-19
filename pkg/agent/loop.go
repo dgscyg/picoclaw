@@ -1296,6 +1296,7 @@ func (al *AgentLoop) runAgentLoop(
 			"iterations":   iteration,
 			"final_length": len(finalContent),
 		})
+	al.runMuninnAutoCapture(ctx, opts)
 
 	return finalContent, nil
 }

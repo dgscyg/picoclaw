@@ -48,25 +48,32 @@ func TestProcessDirectWithChannel_MuninnAutoRecallInjectsRelevantMemoryWithoutPe
 	tmpDir := t.TempDir()
 
 	var activateReq muninndb.ActivateRequest
+	activateCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/activate" {
+		switch r.URL.Path {
+		case "/api/activate":
+			activateCalls++
+			defer r.Body.Close()
+			if err := json.NewDecoder(r.Body).Decode(&activateReq); err != nil {
+				t.Fatalf("decode activate request: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(muninndb.ActivateResponse{
+				QueryID:    "query-1",
+				TotalFound: 1,
+				Activations: []muninndb.ActivationItem{{
+					ID:      "eng-1",
+					Concept: "preference",
+					Content: "Favorite editor: helix. The user explicitly asked to keep using helix for edits.",
+					Score:   0.98,
+				}},
+			})
+		case "/api/engrams":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"eng-write","created_at":123}`))
+		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		defer r.Body.Close()
-		if err := json.NewDecoder(r.Body).Decode(&activateReq); err != nil {
-			t.Fatalf("decode activate request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(muninndb.ActivateResponse{
-			QueryID:    "query-1",
-			TotalFound: 1,
-			Activations: []muninndb.ActivationItem{{
-				ID:      "eng-1",
-				Concept: "preference",
-				Content: "Favorite editor: helix. The user explicitly asked to keep using helix for edits.",
-				Score:   0.98,
-			}},
-		})
 	}))
 	defer server.Close()
 
@@ -111,6 +118,9 @@ func TestProcessDirectWithChannel_MuninnAutoRecallInjectsRelevantMemoryWithoutPe
 	}
 	if activateReq.MaxResults != muninnAutoRecallMaxItems {
 		t.Fatalf("activate max_results = %d, want %d", activateReq.MaxResults, muninnAutoRecallMaxItems)
+	}
+	if activateCalls == 0 {
+		t.Fatal("expected at least one activate call")
 	}
 	if len(activateReq.Context) == 0 || !strings.Contains(
 		strings.ToLower(strings.Join(activateReq.Context, "\n")),

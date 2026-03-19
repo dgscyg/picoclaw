@@ -73,6 +73,12 @@ func (c *Client) WriteEngram(ctx context.Context, content string, tags []string,
 		Tags:    tags,
 		Concept: concept,
 	}
+	return c.WriteEngramRequest(ctx, req)
+}
+
+// WriteEngramRequest writes a new memory engram to MuninnDB with the provided request payload.
+func (c *Client) WriteEngramRequest(ctx context.Context, req WriteRequest) (*WriteResponse, error) {
+	req.Vault = c.vault
 
 	var resp WriteResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/api/engrams", req, &resp); err != nil {
