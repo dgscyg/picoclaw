@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"regexp"
 	"sort"
@@ -17,6 +18,7 @@ const (
 	muninnAutoCaptureTimeout         = 30 * time.Second
 	muninnAutoCaptureActivateLimit   = 5
 	muninnAutoCaptureDuplicateCutoff = 0.92
+	muninnAutoCaptureMinWordCount    = 5
 )
 
 var (
@@ -229,7 +231,7 @@ func extractMuninnAutoCaptureCandidate(opts processOptions) (*muninnAutoCaptureC
 	if message == "" {
 		return nil, "empty user message"
 	}
-	if strings.Count(message, " ") < 3 {
+	if len(strings.Fields(message)) < muninnAutoCaptureMinWordCount {
 		return nil, "message too short for durable capture"
 	}
 	trimmed := strings.TrimSpace(message)
@@ -270,6 +272,12 @@ func extractMuninnAutoCaptureCandidate(opts processOptions) (*muninnAutoCaptureC
 		candidate.Stability = 0.9
 	default:
 		return nil, "message did not match durable capture categories"
+	}
+
+	if confidence, ok := muninnAutoCaptureConfidence(trimmed, candidate.Category); !ok {
+		return nil, "message lacked high-confidence durable phrasing"
+	} else {
+		candidate.Confidence = confidence
 	}
 
 	candidate.Content = trimmed
@@ -329,6 +337,12 @@ func muninnCaptureLooksDuplicate(
 	candidate muninnAutoCaptureCandidate,
 ) bool {
 	normalizedCandidateContent := normalizeWhitespace(strings.ToLower(candidate.Content))
+	if similarDuplicateConfidence(
+		normalizedCandidateContent,
+		normalizeWhitespace(strings.ToLower(item.Content)),
+	) >= 0.85 {
+		return true
+	}
 	if strings.EqualFold(strings.TrimSpace(item.Concept), candidate.Concept) {
 		if normalizeWhitespace(strings.ToLower(item.Content)) == normalizedCandidateContent {
 			return true
@@ -336,9 +350,96 @@ func muninnCaptureLooksDuplicate(
 	}
 	if item.Score >= muninnAutoCaptureDuplicateCutoff {
 		existing := normalizeWhitespace(strings.ToLower(item.Content))
-		return existing == normalizedCandidateContent
+		return similarDuplicateConfidence(normalizedCandidateContent, existing) >= 0.85
 	}
 	return false
+}
+
+func muninnAutoCaptureConfidence(message string, category muninnCaptureCategory) (float64, bool) {
+	trimmed := strings.TrimSpace(message)
+	if trimmed == "" {
+		return 0, false
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "?") {
+		return 0, false
+	}
+	for _, marker := range []string{"maybe", "might", "probably", "perhaps", "i guess", "not sure", "kind of", "sort of", "temporarily"} {
+		if strings.Contains(lower, marker) {
+			return 0, false
+		}
+	}
+	if strings.Contains(lower, " for now") || strings.HasSuffix(lower, "for now.") ||
+		strings.HasSuffix(lower, "for now") {
+		return 0, false
+	}
+
+	score := 0.78
+	if strings.Contains(lower, "from now on") || strings.Contains(lower, "going forward") ||
+		strings.Contains(lower, "every project") {
+		score += 0.16
+	}
+	if strings.Contains(lower, "for this repo") || strings.Contains(lower, "for this repository") ||
+		strings.Contains(lower, "for local development") {
+		score += 0.08
+	}
+	if strings.Contains(lower, "always") || strings.Contains(lower, "never") ||
+		strings.Contains(lower, "only") ||
+		strings.Contains(lower, "must") {
+		score += 0.12
+	}
+	if strings.Contains(lower, "please") {
+		score += 0.02
+	}
+	if strings.Contains(lower, "decided") || strings.Contains(lower, "prefer") ||
+		strings.Contains(lower, "favorite") ||
+		strings.Contains(lower, "call me") {
+		score += 0.08
+	}
+	if category == muninnCaptureCategoryDecision || category == muninnCaptureCategoryConstraint {
+		score += 0.04
+	}
+	score = math.Min(score, 0.99)
+	if score < 0.9 {
+		return 0, false
+	}
+	return score, true
+}
+
+func similarDuplicateConfidence(a, b string) float64 {
+	if a == "" || b == "" {
+		return 0
+	}
+	if a == b {
+		return 1
+	}
+	aTokens := strings.Fields(a)
+	bTokens := strings.Fields(b)
+	if len(aTokens) == 0 || len(bTokens) == 0 {
+		return 0
+	}
+	aSet := make(map[string]struct{}, len(aTokens))
+	for _, token := range aTokens {
+		aSet[token] = struct{}{}
+	}
+	intersection := 0
+	bSet := make(map[string]struct{}, len(bTokens))
+	for _, token := range bTokens {
+		bSet[token] = struct{}{}
+		if _, ok := aSet[token]; ok {
+			intersection++
+		}
+	}
+	union := len(aSet)
+	for token := range bSet {
+		if _, ok := aSet[token]; !ok {
+			union++
+		}
+	}
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
 }
 
 func compactStrings(values []string) []string {

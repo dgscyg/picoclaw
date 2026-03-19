@@ -168,7 +168,7 @@ func TestExtractMuninnAutoCaptureCandidate_ClassifiesStableSemantics(t *testing.
 		},
 		{
 			name:      "constraint",
-			message:   "Please do not use yarn in this repository.",
+			message:   "Please do not use yarn in this repository from now on.",
 			concept:   "explicit_constraint",
 			typeLabel: "constraint",
 		},
@@ -212,14 +212,101 @@ func TestExtractMuninnAutoCaptureCandidate_ClassifiesStableSemantics(t *testing.
 }
 
 func TestExtractMuninnAutoCaptureCandidate_DropsLowConfidenceNoise(t *testing.T) {
-	candidate, reason := extractMuninnAutoCaptureCandidate(
-		processOptions{UserMessage: "maybe later", Channel: "claweb"},
-	)
-	if candidate != nil {
-		t.Fatalf("expected nil candidate, got %+v", candidate)
+	t.Run("short noisy utterance", func(t *testing.T) {
+		candidate, reason := extractMuninnAutoCaptureCandidate(
+			processOptions{UserMessage: "maybe later", Channel: "claweb"},
+		)
+		if candidate != nil {
+			t.Fatalf("expected nil candidate, got %+v", candidate)
+		}
+		if reason == "" {
+			t.Fatal("expected drop reason")
+		}
+	})
+
+	t.Run("ambiguous preference phrasing", func(t *testing.T) {
+		candidate, reason := extractMuninnAutoCaptureCandidate(
+			processOptions{UserMessage: "I maybe prefer dark mode for now.", Channel: "claweb"},
+		)
+		if candidate != nil {
+			t.Fatalf("expected nil candidate, got %+v", candidate)
+		}
+		if reason == "" {
+			t.Fatalf("reason = %q", reason)
+		}
+	})
+}
+
+func TestMuninnCaptureLooksDuplicate_FuzzyMatchPreventsNearDuplicates(t *testing.T) {
+	candidate := muninnAutoCaptureCandidate{
+		Concept: "user_preference",
+		Content: "I prefer dark mode for every project we work on.",
 	}
-	if reason == "" {
-		t.Fatal("expected drop reason")
+	item := muninndb.ActivationItem{
+		Concept: "user_preference",
+		Content: "I prefer dark mode for every project that we work on.",
+		Score:   0.95,
+	}
+	if !muninnCaptureLooksDuplicate(item, candidate) {
+		t.Fatal("expected fuzzy duplicate match")
+	}
+}
+
+func TestProcessDirectWithChannel_MuninnAutoCaptureSkipsDuplicateWrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	activateResponses := []muninndb.ActivateResponse{
+		{QueryID: "recall-1", TotalFound: 0, Activations: []muninndb.ActivationItem{}},
+		{QueryID: "dedupe-1", TotalFound: 1, Activations: []muninndb.ActivationItem{{
+			Concept: "user_preference",
+			Content: "I prefer dark mode for every project that we work on.",
+			Score:   0.88,
+		}}},
+	}
+	writeCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/activate":
+			defer r.Body.Close()
+			if len(activateResponses) == 0 {
+				t.Fatalf("unexpected extra activate call")
+			}
+			resp := activateResponses[0]
+			activateResponses = activateResponses[1:]
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		case "/api/engrams":
+			writeCalls++
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"eng-should-not-write","created_at":789}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := &captureTestProvider{response: "Noted."}
+	al := NewAgentLoop(testMuninnConfig(tmpDir, server.URL), bus.NewMessageBus(), provider)
+
+	response, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"I prefer dark mode for every project we work on.",
+		"session-capture-dedupe",
+		"claweb",
+		"room-dedupe",
+	)
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel() error = %v", err)
+	}
+	if response != "Noted." {
+		t.Fatalf("response = %q", response)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	if writeCalls != 0 {
+		t.Fatalf("writeCalls = %d, want 0", writeCalls)
+	}
+	if len(activateResponses) != 0 {
+		t.Fatalf("unused activate responses: %d", len(activateResponses))
 	}
 }
 
