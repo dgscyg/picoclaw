@@ -1,0 +1,70 @@
+{
+  "milestone": "transparent-capture",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "go test -p 3 ./pkg/agent ./pkg/config ./pkg/mcp ./pkg/muninndb ./pkg/tools ./pkg/channels/claweb -skip \"TestShellTool_(DevNullAllowed|FileURISandboxing|URLBypassPrevented)\" -count=1",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "go test -run '^$' ./...",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "node ./.factory/scripts/lint-changed.mjs",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 0,
+    "failed": 2,
+    "failedFeatures": [
+      "muninn-auto-capture-pipeline",
+      "muninn-capture-dedupe-and-claweb-cross-turn-flow"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "muninn-auto-capture-pipeline",
+      "severity": "blocking",
+      "description": "The auto-capture extractor drops explicit durable facts before semantic classification when the utterance is short or lacks enough punctuation/length, so constraints, contact mappings, and project decisions like 'Use pnpm.' or 'Call me Alex.' are not reliably captured."
+    },
+    {
+      "featureId": "muninn-auto-capture-pipeline",
+      "severity": "blocking",
+      "description": "Constraint detection is overly narrow because it mainly matches leading imperative forms, so explicit constraints or project decisions phrased later in the sentence are missed and the feature does not reliably satisfy stable-semantic capture requirements."
+    },
+    {
+      "featureId": "muninn-capture-dedupe-and-claweb-cross-turn-flow",
+      "severity": "blocking",
+      "description": "The confidence gate still rejects plainly stated durable preferences unless they include extra booster phrasing, so low-noise preferences remain uncaptured despite matching a durable capture category."
+    },
+    {
+      "featureId": "muninn-capture-dedupe-and-claweb-cross-turn-flow",
+      "severity": "blocking",
+      "description": "Required claweb multi-turn evidence for VAL-CROSS-001 is still missing: the reviewed test only proves duplicate-write suppression within one turn and does not prove capture-then-recall through the allowed claweb surface without manual memory tools."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Tighten the `go-memory-worker` handoff rules so workers must include explicit evidence that they read mission artifacts (`mission.md` and `validation-contract.md`) before implementation, or explain why the transcript skeleton omits those required reads.",
+      "evidence": "Review of worker session `b3addb9c-1443-424a-ab15-571ac7cb6a46` found no transcript evidence of the skill-mandated mission artifact reads before implementation, despite `.factory/skills/go-memory-worker/SKILL.md` requiring them.",
+      "isSystemic": false
+    },
+    {
+      "target": "skills",
+      "suggestion": "Clarify in `go-memory-worker` that features whose verification steps require live claweb or cross-turn proof must not be handed off as complete based only on unit tests or code-path inspection; the handoff must include the actual end-to-end evidence or clearly return partial/failure.",
+      "evidence": "Review of feature `muninn-capture-dedupe-and-claweb-cross-turn-flow` found the handoff substituted code-path review for the required manual claweb verification, leaving VAL-CROSS-001 unproven while the feature was marked completed.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}
