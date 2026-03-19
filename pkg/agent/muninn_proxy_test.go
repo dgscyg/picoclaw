@@ -26,13 +26,13 @@ func TestMuninnValidationDryRunConfig_ValidateConfig(t *testing.T) {
 	}
 }
 
-func TestMuninnValidationDryRunConfig_RejectsDefaultVault(t *testing.T) {
+func TestMuninnValidationDryRunConfig_RejectsUnexpectedVault(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Memory.Provider = config.MemoryProviderMuninnDB
 	cfg.Memory.MuninnDB = &config.MuninnDBConfig{
 		MCPEndpoint:  "http://127.0.0.1:8750",
 		RESTEndpoint: "http://127.0.0.1:8475",
-		Vault:        config.DefaultMemoryVault,
+		Vault:        "other-vault",
 	}
 	cfg.Channels.Claweb.Enabled = true
 	cfg.Channels.Claweb.ListenHost = "127.0.0.1"
@@ -41,7 +41,7 @@ func TestMuninnValidationDryRunConfig_RejectsDefaultVault(t *testing.T) {
 
 	err := DefaultMuninnValidationDryRunConfig().ValidateConfig(cfg)
 	if err == nil || !strings.Contains(err.Error(), MuninnValidationVault) {
-		t.Fatalf("ValidateConfig() error = %v, want mention of dedicated vault", err)
+		t.Fatalf("ValidateConfig() error = %v, want mention of validation vault", err)
 	}
 }
 

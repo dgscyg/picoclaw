@@ -10,7 +10,7 @@ import (
 
 const (
 	MuninnAutoRecallBlockTitle = "Relevant Memory (Muninn Auto-Recall)"
-	MuninnValidationVault      = "picoclaw-transparent-layer-test"
+	MuninnValidationVault      = config.DefaultMemoryVault
 	MuninnValidationChannel    = "claweb"
 )
 
@@ -104,8 +104,8 @@ type MuninnProxyResult struct {
 	PromptBlock    MuninnProxyPromptBlock
 }
 
-// MuninnValidationDryRunConfig describes the dedicated claweb validation shape
-// required by this mission without touching runtime behavior.
+// MuninnValidationDryRunConfig describes the claweb validation shape required by
+// this mission without touching runtime behavior.
 type MuninnValidationDryRunConfig struct {
 	Vault                   string
 	Channel                 string
@@ -138,7 +138,7 @@ func (v MuninnValidationDryRunConfig) ValidateConfig(cfg *config.Config) error {
 		wantVault = MuninnValidationVault
 	}
 	if got := strings.TrimSpace(muninnCfg.Vault); got != wantVault {
-		return fmt.Errorf("muninn validation requires dedicated vault %q, got %q", wantVault, got)
+		return fmt.Errorf("muninn validation requires vault %q, got %q", wantVault, got)
 	}
 	if muninnCfg.ResolvedMCPEndpoint() == "" {
 		return fmt.Errorf("muninn validation requires memory.muninndb.mcp_endpoint")
