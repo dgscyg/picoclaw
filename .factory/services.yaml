@@ -1,0 +1,34 @@
+commands:
+  install: sh ./.factory/init.sh
+  test: go test -p 3 ./pkg/agent ./pkg/config ./pkg/mcp ./pkg/muninndb ./pkg/tools ./pkg/channels/claweb -skip "TestShellTool_(DevNullAllowed|FileURISandboxing|URLBypassPrevented)" -count=1
+  lint: golangci-lint run
+  claweb_e2e: node ./.factory/scripts/claweb-e2e.mjs --base http://127.0.0.1:18081 --passphrase change-me --clientId validator-client --userId user-guest-a --message "reply with exactly pong"
+
+services:
+  muninn_rest:
+    start: powershell -NoProfile -Command "if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8475/api/health -TimeoutSec 5).StatusCode -eq 200) { Write-Output 'Muninn already running on 8475' } else { exit 1 }"
+    stop: powershell -NoProfile -Command "Write-Output 'Leave the existing Muninn service on 8475 running'"
+    healthcheck: powershell -NoProfile -Command "(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8475/api/health -TimeoutSec 5).Content"
+    port: 8475
+    depends_on: []
+
+  muninn_mcp:
+    start: powershell -NoProfile -Command "if ((Test-NetConnection 127.0.0.1 -Port 8750).TcpTestSucceeded) { Write-Output 'Muninn MCP listener already reachable on 8750' } else { exit 1 }"
+    stop: powershell -NoProfile -Command "Write-Output 'Leave the existing Muninn MCP listener on 8750 running'"
+    healthcheck: powershell -NoProfile -Command "if ((Test-NetConnection 127.0.0.1 -Port 8750).TcpTestSucceeded) { Write-Output '8750 ok' } else { exit 1 }"
+    port: 8750
+    depends_on: []
+
+  gateway:
+    start: powershell -NoProfile -Command "$env:PICOCLAW_CONFIG=(Resolve-Path './tmp/claweb-dryrun.json').Path; & (Resolve-Path './picoclaw.exe').Path gateway --debug"
+    stop: powershell -NoProfile -Command "Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq 18790 } | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }"
+    healthcheck: powershell -NoProfile -Command "(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18790/health -TimeoutSec 5).StatusCode"
+    port: 18790
+    depends_on: [muninn_rest, muninn_mcp]
+
+  claweb_frontdoor:
+    start: powershell -NoProfile -Command "$env:PORT='18081'; $env:BIND='127.0.0.1'; $env:CLAWEB_UPSTREAM_WS='ws://127.0.0.1:18999'; $env:CLAWEB_UPSTREAM_TOKEN_FILE=(Resolve-Path './tmp/claweb.token').Path; $env:CLAWEB_LOGIN_CONFIG=(Resolve-Path '../claweb/access/frontdoor/config/claweb-login.json').Path; Set-Location (Resolve-Path '../claweb/access/frontdoor').Path; node server.js"
+    stop: powershell -NoProfile -Command "Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq 18081 } | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }"
+    healthcheck: powershell -NoProfile -Command "(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18081/ -TimeoutSec 5).StatusCode"
+    port: 18081
+    depends_on: [gateway]

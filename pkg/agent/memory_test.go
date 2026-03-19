@@ -126,13 +126,13 @@ func TestMuninnDBMemoryStoreConfigValidation(t *testing.T) {
 		{
 			name:    "missing endpoint",
 			cfg:     &config.MuninnDBConfig{},
-			wantErr: "muninndb mcp endpoint is required",
+			wantErr: "muninndb rest endpoint is required",
 		},
 		{
 			name: "invalid timeout",
 			cfg: &config.MuninnDBConfig{
-				MCPEndpoint: "http://127.0.0.1:8080",
-				Timeout:     "invalid",
+				RESTEndpoint: "http://127.0.0.1:8080",
+				Timeout:      "invalid",
 			},
 			wantErr: "parse muninndb timeout",
 		},
@@ -148,6 +148,35 @@ func TestMuninnDBMemoryStoreConfigValidation(t *testing.T) {
 				t.Fatalf("error = %q, want substring %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestNewMuninnDBMemoryStore_UsesSeparateRESTEndpoint(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"ok":true,"activations":[]}`))
+	}))
+	defer server.Close()
+
+	store, err := NewMuninnDBMemoryStore(&config.MuninnDBConfig{
+		MCPEndpoint:  "http://127.0.0.1:8750/mcp",
+		RESTEndpoint: server.URL,
+		Vault:        "test-vault",
+	}, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewMuninnDBMemoryStore() error = %v", err)
+	}
+
+	result, err := store.Recall(context.Background(), "project decision", 2)
+	if err != nil {
+		t.Fatalf("Recall() error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("Recall() returned nil result")
+	}
+	if gotPath != "/api/activate" {
+		t.Fatalf("REST request path = %q, want /api/activate", gotPath)
 	}
 }
 

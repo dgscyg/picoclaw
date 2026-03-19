@@ -47,6 +47,7 @@ func TestMemoryConfig_Defaults(t *testing.T) {
 
 func TestLoadConfig_MemoryEnvExpansion(t *testing.T) {
 	t.Setenv("MUNINNDB_MCP_ENDPOINT", "http://localhost:8750/mcp")
+	t.Setenv("MUNINNDB_REST_ENDPOINT", "http://localhost:8475")
 	t.Setenv("MUNINNDB_VAULT", "team")
 	t.Setenv("MUNINNDB_API_KEY", "secret-key")
 	jsonData := `{
@@ -54,6 +55,7 @@ func TestLoadConfig_MemoryEnvExpansion(t *testing.T) {
 			"provider": "muninndb",
 			"muninndb": {
 				"mcp_endpoint": "${MUNINNDB_MCP_ENDPOINT}",
+				"rest_endpoint": "${MUNINNDB_REST_ENDPOINT}",
 				"vault": "${MUNINNDB_VAULT}",
 				"api_key": "${MUNINNDB_API_KEY}"
 			}
@@ -74,6 +76,9 @@ func TestLoadConfig_MemoryEnvExpansion(t *testing.T) {
 	if cfg.Memory.MuninnDB.MCPEndpoint != "http://localhost:8750/mcp" {
 		t.Fatalf("MCPEndpoint = %q", cfg.Memory.MuninnDB.MCPEndpoint)
 	}
+	if cfg.Memory.MuninnDB.RESTEndpoint != "http://localhost:8475" {
+		t.Fatalf("RESTEndpoint = %q", cfg.Memory.MuninnDB.RESTEndpoint)
+	}
 	if cfg.Memory.MuninnDB.Vault != "team" {
 		t.Fatalf("Vault = %q", cfg.Memory.MuninnDB.Vault)
 	}
@@ -89,6 +94,31 @@ func TestLoadConfig_MemoryEnvExpansion(t *testing.T) {
 	}
 	if server.Headers["Authorization"] != "Bearer secret-key" {
 		t.Fatalf("muninn mcp auth header missing")
+	}
+}
+
+func TestMuninnDBConfig_ResolvedEndpoints(t *testing.T) {
+	cfg := &MuninnDBConfig{
+		MCPEndpoint:  "http://127.0.0.1:8750",
+		RESTEndpoint: "http://127.0.0.1:8475",
+	}
+
+	if got := cfg.ResolvedMCPEndpoint(); got != "http://127.0.0.1:8750" {
+		t.Fatalf("ResolvedMCPEndpoint() = %q", got)
+	}
+	if got := cfg.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8475" {
+		t.Fatalf("ResolvedRESTEndpoint() = %q", got)
+	}
+	if !cfg.HasSeparateRESTEndpoint() {
+		t.Fatal("HasSeparateRESTEndpoint() = false, want true")
+	}
+
+	cfg.RESTEndpoint = ""
+	if got := cfg.ResolvedRESTEndpoint(); got != cfg.MCPEndpoint {
+		t.Fatalf("ResolvedRESTEndpoint() fallback = %q, want %q", got, cfg.MCPEndpoint)
+	}
+	if cfg.HasSeparateRESTEndpoint() {
+		t.Fatal("HasSeparateRESTEndpoint() = true, want false")
 	}
 }
 
@@ -118,10 +148,18 @@ func TestLoadConfig_MemoryValidation(t *testing.T) {
 func TestEnsureMuninnMCPConfigUsesOnlyAPIKey(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Memory.Provider = MemoryProviderMuninnDB
-	cfg.Memory.MuninnDB = &MuninnDBConfig{MCPEndpoint: "http://127.0.0.1:8750/mcp", Vault: "default", APIKey: "mdb_test_token"}
+	cfg.Memory.MuninnDB = &MuninnDBConfig{
+		MCPEndpoint:  "http://127.0.0.1:8750/mcp",
+		RESTEndpoint: "http://127.0.0.1:8475",
+		Vault:        "default",
+		APIKey:       "mdb_test_token",
+	}
 	EnsureMuninnMCPConfig(cfg)
 	if got := cfg.Tools.MCP.Servers[DefaultMuninnMCPName].Headers["Authorization"]; got != "Bearer mdb_test_token" {
 		t.Fatalf("Authorization header = %q", got)
+	}
+	if got := cfg.Tools.MCP.Servers[DefaultMuninnMCPName].URL; got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("muninn MCP URL = %q, want mcp endpoint", got)
 	}
 }
 

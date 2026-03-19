@@ -26,9 +26,9 @@ func NewMuninnDBMemoryStore(cfg *config.MuninnDBConfig, workspace string) (*Muni
 	if cfg == nil {
 		return nil, fmt.Errorf("muninndb config is required")
 	}
-	endpoint := strings.TrimSpace(cfg.MCPEndpoint)
+	endpoint := cfg.ResolvedRESTEndpoint()
 	if endpoint == "" {
-		return nil, fmt.Errorf("muninndb mcp endpoint is required")
+		return nil, fmt.Errorf("muninndb rest endpoint is required")
 	}
 	vault := strings.TrimSpace(cfg.Vault)
 	if vault == "" {
@@ -43,7 +43,7 @@ func NewMuninnDBMemoryStore(cfg *config.MuninnDBConfig, workspace string) (*Muni
 		httpClient.Timeout = d
 	}
 	store := &MuninnDBMemoryStore{client: muninndb.NewClientWithHTTPClient(httpClient, endpoint, vault, strings.TrimSpace(cfg.APIKey)), vault: vault, fallback: NewFileMemoryStore(workspace)}
-	logger.InfoCF("agent", "Initialized compatibility MuninnDB memory store", map[string]any{"vault": vault, "mcp_endpoint": endpoint})
+	logger.InfoCF("agent", "Initialized compatibility MuninnDB memory store", map[string]any{"vault": vault, "rest_endpoint": endpoint, "mcp_endpoint": cfg.ResolvedMCPEndpoint(), "split_endpoints": cfg.HasSeparateRESTEndpoint()})
 	return store, nil
 }
 

@@ -25,10 +25,37 @@ type FileMemoryConfig struct {
 }
 
 type MuninnDBConfig struct {
-	MCPEndpoint string `json:"mcp_endpoint"`
-	Vault       string `json:"vault"`
-	APIKey      string `json:"api_key"`
-	Timeout     string `json:"timeout"`
+	MCPEndpoint  string `json:"mcp_endpoint"`
+	RESTEndpoint string `json:"rest_endpoint,omitempty"`
+	Vault        string `json:"vault"`
+	APIKey       string `json:"api_key"`
+	Timeout      string `json:"timeout"`
+}
+
+func (c *MuninnDBConfig) ResolvedMCPEndpoint() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.MCPEndpoint)
+}
+
+func (c *MuninnDBConfig) ResolvedRESTEndpoint() string {
+	if c == nil {
+		return ""
+	}
+	if endpoint := strings.TrimSpace(c.RESTEndpoint); endpoint != "" {
+		return endpoint
+	}
+	return strings.TrimSpace(c.MCPEndpoint)
+}
+
+func (c *MuninnDBConfig) HasSeparateRESTEndpoint() bool {
+	if c == nil {
+		return false
+	}
+	rest := strings.TrimSpace(c.RESTEndpoint)
+	mcp := strings.TrimSpace(c.MCPEndpoint)
+	return rest != "" && rest != mcp
 }
 
 func (c *MemoryConfig) ApplyDefaults() {
@@ -58,6 +85,7 @@ func (c *MemoryConfig) ExpandEnvVars() {
 	}
 	if c.MuninnDB != nil {
 		c.MuninnDB.MCPEndpoint = expandEnvVars(c.MuninnDB.MCPEndpoint)
+		c.MuninnDB.RESTEndpoint = expandEnvVars(c.MuninnDB.RESTEndpoint)
 		c.MuninnDB.Vault = expandEnvVars(c.MuninnDB.Vault)
 		c.MuninnDB.APIKey = expandEnvVars(c.MuninnDB.APIKey)
 		c.MuninnDB.Timeout = expandEnvVars(c.MuninnDB.Timeout)
@@ -75,7 +103,7 @@ func (c *MemoryConfig) Validate() error {
 		if c.MuninnDB == nil {
 			return fmt.Errorf("memory.muninndb is required when memory.provider is %q", MemoryProviderMuninnDB)
 		}
-		if strings.TrimSpace(c.MuninnDB.MCPEndpoint) == "" {
+		if c.MuninnDB.ResolvedMCPEndpoint() == "" {
 			return fmt.Errorf("memory.muninndb.mcp_endpoint is required when memory.provider is %q", MemoryProviderMuninnDB)
 		}
 		if strings.TrimSpace(c.MuninnDB.Vault) == "" {
@@ -103,7 +131,7 @@ func EnsureMuninnMCPConfig(cfg *Config) {
 	server := MCPServerConfig{
 		Enabled: true,
 		Type:    "http",
-		URL:     strings.TrimSpace(cfg.Memory.MuninnDB.MCPEndpoint),
+		URL:     cfg.Memory.MuninnDB.ResolvedMCPEndpoint(),
 	}
 	if token := strings.TrimSpace(cfg.Memory.MuninnDB.APIKey); token != "" {
 		server.Headers = map[string]string{"Authorization": "Bearer " + token}
