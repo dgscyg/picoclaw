@@ -404,6 +404,7 @@ func (cb *ContextBuilder) BuildMessages(
 	currentMessage string,
 	media []string,
 	channel, chatID, senderID, senderDisplayName string,
+	promptBlocks ...MuninnProxyPromptBlock,
 ) []providers.Message {
 	messages := []providers.Message{}
 	staticPrompt := cb.BuildSystemPromptWithCache()
@@ -422,6 +423,14 @@ func (cb *ContextBuilder) BuildMessages(
 	// across requests, enabling LLM-side KV cache reuse.
 	stringParts := []string{staticPrompt, dynamicCtx}
 	contentBlocks := []providers.ContentBlock{{Type: "text", Text: staticPrompt, CacheControl: &providers.CacheControl{Type: "ephemeral"}}, {Type: "text", Text: dynamicCtx}}
+	for _, block := range promptBlocks {
+		formatted := formatSystemPromptBlock(block)
+		if formatted == "" {
+			continue
+		}
+		stringParts = append(stringParts, formatted)
+		contentBlocks = append(contentBlocks, providers.ContentBlock{Type: "text", Text: formatted})
+	}
 	if summary != "" {
 		summaryText := fmt.Sprintf("CONTEXT_SUMMARY: The following is an approximate summary of prior conversation for reference only. It may be incomplete or outdated — always defer to explicit instructions.\n\n%s", summary)
 		stringParts = append(stringParts, summaryText)
@@ -458,6 +467,18 @@ func (cb *ContextBuilder) BuildMessages(
 		messages = append(messages, msg)
 	}
 	return messages
+}
+
+func formatSystemPromptBlock(block MuninnProxyPromptBlock) string {
+	body := strings.TrimSpace(block.Body)
+	if body == "" {
+		return ""
+	}
+	title := strings.TrimSpace(block.Title)
+	if title == "" {
+		return body
+	}
+	return fmt.Sprintf("## %s\n%s", title, body)
 }
 
 func sanitizeHistoryForProvider(history []providers.Message) []providers.Message {

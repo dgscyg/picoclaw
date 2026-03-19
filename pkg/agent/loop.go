@@ -70,6 +70,7 @@ type processOptions struct {
 	EnableSummary        bool     // Whether to trigger summarization
 	SendResponse         bool     // Whether to send response via bus
 	NoHistory            bool     // If true, don't load session history (for heartbeat)
+	DynamicPromptBlocks  []MuninnProxyPromptBlock
 }
 
 const (
@@ -1161,6 +1162,11 @@ func (al *AgentLoop) runAgentLoop(
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
 	}
+	if len(opts.DynamicPromptBlocks) == 0 {
+		if recallResult := al.runMuninnAutoRecall(ctx, opts); recallResult.PromptBlock.Enabled() {
+			opts.DynamicPromptBlocks = append(opts.DynamicPromptBlocks, recallResult.PromptBlock)
+		}
+	}
 	messages := agent.ContextBuilder.BuildMessages(
 		history,
 		summary,
@@ -1170,6 +1176,7 @@ func (al *AgentLoop) runAgentLoop(
 		opts.ChatID,
 		opts.SenderID,
 		opts.SenderDisplayName,
+		opts.DynamicPromptBlocks...,
 	)
 
 	// Resolve media:// refs: images→base64 data URLs, non-images→local paths in content
@@ -1510,7 +1517,7 @@ func (al *AgentLoop) runLLMIteration(
 				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
 				messages = agent.ContextBuilder.BuildMessages(
 					newHistory, newSummary, "",
-					nil, opts.Channel, opts.ChatID, opts.SenderID, opts.SenderDisplayName,
+					nil, opts.Channel, opts.ChatID, opts.SenderID, opts.SenderDisplayName, opts.DynamicPromptBlocks...,
 				)
 				continue
 			}
