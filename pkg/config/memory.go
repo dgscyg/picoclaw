@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"path"
 	"strings"
 )
 
@@ -36,7 +38,7 @@ func (c *MuninnDBConfig) ResolvedMCPEndpoint() string {
 	if c == nil {
 		return ""
 	}
-	return strings.TrimSpace(c.MCPEndpoint)
+	return normalizeMuninnMCPEndpoint(strings.TrimSpace(c.MCPEndpoint))
 }
 
 func (c *MuninnDBConfig) ResolvedRESTEndpoint() string {
@@ -46,7 +48,7 @@ func (c *MuninnDBConfig) ResolvedRESTEndpoint() string {
 	if endpoint := strings.TrimSpace(c.RESTEndpoint); endpoint != "" {
 		return endpoint
 	}
-	return strings.TrimSpace(c.MCPEndpoint)
+	return normalizeMuninnRESTEndpoint(strings.TrimSpace(c.MCPEndpoint))
 }
 
 func (c *MuninnDBConfig) HasSeparateRESTEndpoint() bool {
@@ -145,4 +147,38 @@ func expandEnvVars(s string) string {
 		return os.Getenv(envVar)
 	}
 	return s
+}
+
+func normalizeMuninnMCPEndpoint(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return raw
+	}
+	if parsed.Path == "" || parsed.Path == "/" {
+		parsed.Path = "/mcp"
+		return parsed.String()
+	}
+	return raw
+}
+
+func normalizeMuninnRESTEndpoint(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return raw
+	}
+	cleanPath := path.Clean("/" + strings.TrimSpace(parsed.Path))
+	if cleanPath == "/mcp" {
+		parsed.Path = ""
+		parsed.RawPath = ""
+		return strings.TrimSuffix(parsed.String(), "/")
+	}
+	return raw
 }

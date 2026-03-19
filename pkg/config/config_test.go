@@ -103,7 +103,7 @@ func TestMuninnDBConfig_ResolvedEndpoints(t *testing.T) {
 		RESTEndpoint: "http://127.0.0.1:8475",
 	}
 
-	if got := cfg.ResolvedMCPEndpoint(); got != "http://127.0.0.1:8750" {
+	if got := cfg.ResolvedMCPEndpoint(); got != "http://127.0.0.1:8750/mcp" {
 		t.Fatalf("ResolvedMCPEndpoint() = %q", got)
 	}
 	if got := cfg.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8475" {
@@ -114,11 +114,29 @@ func TestMuninnDBConfig_ResolvedEndpoints(t *testing.T) {
 	}
 
 	cfg.RESTEndpoint = ""
-	if got := cfg.ResolvedRESTEndpoint(); got != cfg.MCPEndpoint {
-		t.Fatalf("ResolvedRESTEndpoint() fallback = %q, want %q", got, cfg.MCPEndpoint)
+	if got := cfg.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8750" {
+		t.Fatalf("ResolvedRESTEndpoint() fallback = %q, want %q", got, "http://127.0.0.1:8750")
 	}
 	if cfg.HasSeparateRESTEndpoint() {
 		t.Fatal("HasSeparateRESTEndpoint() = true, want false")
+	}
+}
+
+func TestMuninnDBConfig_NormalizesMCPEndpointAndRESTFallback(t *testing.T) {
+	cfg := &MuninnDBConfig{MCPEndpoint: "http://127.0.0.1:8750"}
+	if got := cfg.ResolvedMCPEndpoint(); got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("ResolvedMCPEndpoint() = %q, want /mcp suffix", got)
+	}
+	if got := cfg.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8750" {
+		t.Fatalf("ResolvedRESTEndpoint() = %q, want base endpoint", got)
+	}
+
+	cfg.MCPEndpoint = "http://127.0.0.1:8750/mcp"
+	if got := cfg.ResolvedMCPEndpoint(); got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("ResolvedMCPEndpoint() with existing /mcp = %q", got)
+	}
+	if got := cfg.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8750" {
+		t.Fatalf("ResolvedRESTEndpoint() from /mcp = %q, want base endpoint", got)
 	}
 }
 
