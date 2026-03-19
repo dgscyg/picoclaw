@@ -9,7 +9,7 @@ Environment variables, external dependencies, and setup notes for the transparen
 
 - Reuse the existing Muninn REST service on `http://127.0.0.1:8475`.
 - Reuse the existing Muninn MCP listener on `http://127.0.0.1:8750`.
-- Validation must target the dedicated vault `picoclaw-transparent-layer-test`, never `default`.
+- User-approved boundary change 2026-03-19: validation now targets the default Muninn vault `default`.
 - Local claweb validation depends on the sibling checkout at `../claweb/access/frontdoor`.
 - `.factory/init.sh` generates these untracked local validation files under `tmp/`:
   - `tmp/claweb.token`

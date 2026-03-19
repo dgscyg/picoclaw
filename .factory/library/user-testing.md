@@ -12,7 +12,7 @@ Testing surface notes for validators and workers.
 ### Surface: live Muninn integration
 
 - Reuse the existing REST service at `http://127.0.0.1:8475` and the existing MCP listener at `http://127.0.0.1:8750`.
-- Validate against the dedicated vault `picoclaw-transparent-layer-test` only.
+- User-approved boundary change 2026-03-19: validate against the default vault `default`.
 - Primary assertions covered here:
   - auto recall hit/miss behavior
   - capture write/drop behavior
@@ -50,11 +50,11 @@ Testing surface notes for validators and workers.
 ### Surface: live Muninn
 
 - Treat Muninn as a shared dependency, not a multiply-spawned service.
-- Avoid parallel flows that intentionally mutate the same fact set in the dedicated vault unless the test is explicitly about dedupe/conflict handling.
+- Avoid parallel flows that intentionally mutate the same fact set in the validation vault unless the test is explicitly about dedupe/conflict handling.
 
 ## Practical Gotchas
 
 - The upstream frontdoor smoke scripts currently assume HTTPS helpers even when pointed at `http://` URLs. For local HTTP validation, use `.factory/scripts/claweb-e2e.mjs` instead.
 - Repository-wide `pkg/tools/shell_test.go` coverage is currently a pre-existing Windows blocker unrelated to this mission. The mission baseline therefore skips only the failing shell-tool cases in `.factory/services.yaml`; do not treat those exclusions as Muninn regressions unless scope explicitly expands.
-- Validation setup must not write to the default Muninn vault.
-- If the dedicated test vault cannot be written and no safe code-path exists to create it implicitly, stop and return to orchestrator instead of contaminating another vault.
+- Validation setup is now user-approved to use the default Muninn vault `default`; do not touch any other vault.
+- If the default vault cannot be read or written with the current local Muninn credentials/config, stop and return to orchestrator.

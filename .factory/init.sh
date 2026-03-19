@@ -3,7 +3,7 @@ set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SOURCE_CONFIG="${PICOCLAW_VALIDATION_SOURCE_CONFIG:-$ROOT/config/config.json}"
-TEST_VAULT="${PICOCLAW_MUNINN_TEST_VAULT:-picoclaw-transparent-layer-test}"
+TEST_VAULT="${PICOCLAW_MUNINN_TEST_VAULT:-default}"
 MCP_ENDPOINT="${PICOCLAW_MUNINN_MCP_ENDPOINT:-http://127.0.0.1:8750}"
 REST_ENDPOINT="${PICOCLAW_MUNINN_REST_ENDPOINT:-http://127.0.0.1:8475}"
 FRONTDOOR_DIR="$ROOT/../claweb/access/frontdoor"
@@ -98,4 +98,4 @@ const out = {
 fs.writeFileSync(path.join(root, 'tmp', 'claweb-dryrun.json'), JSON.stringify(out, null, 2));
 NODE
 
-echo "Prepared validation artifacts in $ROOT/tmp using test vault: $TEST_VAULT"
+echo "Prepared validation artifacts in $ROOT/tmp using validation vault: $TEST_VAULT"

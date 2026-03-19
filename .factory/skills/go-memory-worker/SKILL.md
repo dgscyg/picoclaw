@@ -20,18 +20,18 @@ Use this skill for features that modify PicoClaw's Go-based agent/runtime behavi
 1. Read the mission artifacts first: `mission.md`, `AGENTS.md`, `validation-contract.md`, `.factory/library/*.md`, and `.factory/services.yaml`.
 2. Confirm the feature's claimed assertions and verification steps before editing code. If the feature description is too ambiguous to know what must pass, return to orchestrator.
 3. Run `.factory/init.sh` if startup did not already do so. Verify that:
-   - the dedicated vault target is `picoclaw-transparent-layer-test`
+   - the validation vault target is `default`
    - the local dry-run claweb config/token files exist
    - the existing Muninn service on `127.0.0.1:8475` is reachable
 4. Write tests first (red). Add or extend focused tests that fail for the missing behavior before implementing code. Prefer the smallest package scope that proves the feature.
 5. Implement the feature in the existing PicoClaw architecture. Keep non-Muninn behavior unchanged, preserve `mcp_muninn_*` interoperability, and use structured logs via existing logger patterns.
 6. Run targeted tests until green. Then run the mission-level test command from `.factory/services.yaml` if the feature touches shared behavior.
-7. If the feature affects end-to-end behavior or any cross-turn flow, manually verify through the allowed claweb surface or the designated direct-agent harness. Use the dedicated test vault only.
+7. If the feature affects end-to-end behavior or any cross-turn flow, manually verify through the allowed claweb surface or the designated direct-agent harness. Use the approved validation vault `default` only.
 8. Run lint before handoff. Do not hand off with failing lint or tests unless the orchestrator explicitly approved that exception.
 9. Inspect your diff for accidental secret exposure, default-vault writes, or non-claweb channel changes. Revert those before finishing.
 10. In the handoff, be explicit about:
     - which assertions are now fully testable
-    - the dedicated vault used in verification
+    - the validation vault used in verification
     - whether claweb e2e was exercised
     - any Muninn limitations, misses, or recovery behavior you observed
 
@@ -40,7 +40,7 @@ Use this skill for features that modify PicoClaw's Go-based agent/runtime behavi
 ```json
 {
   "salientSummary": "Implemented transparent auto-recall in Muninn mode with a bounded Relevant Memory block and graceful miss handling; preserved manual mcp_muninn deepening and confirmed non-Muninn mode stayed unchanged.",
-  "whatWasImplemented": "Added a Muninn recall planner and prompt-injection path under pkg/agent, kept the injected block out of persisted history, reused the configured non-default vault for both auto recall and manual Muninn MCP calls, and added focused regression tests for miss/error handling plus non-Muninn behavior.",
+  "whatWasImplemented": "Added a Muninn recall planner and prompt-injection path under pkg/agent, kept the injected block out of persisted history, reused the configured validation vault for both auto recall and manual Muninn MCP calls, and added focused regression tests for miss/error handling plus non-Muninn behavior.",
   "whatWasLeftUndone": "",
   "verification": {
     "commandsRun": [
@@ -55,15 +55,15 @@ Use this skill for features that modify PicoClaw's Go-based agent/runtime behavi
         "observation": "Manual Muninn MCP interoperability still worked and forced vault arguments remained intact."
       },
       {
-        "command": "golangci-lint run",
+        "command": "node ./.factory/scripts/lint-changed.mjs",
         "exitCode": 0,
-        "observation": "No new lint findings."
+        "observation": "Change-scoped lint passed with no new findings."
       }
     ],
     "interactiveChecks": [
       {
-        "action": "Seeded the dedicated vault `picoclaw-transparent-layer-test` with a known preference, started the local gateway/frontdoor validation stack, then asked a recall-dependent claweb question without manually invoking a Muninn tool.",
-        "observed": "Assistant answered using the seeded preference; gateway logs showed auto recall hit and injected_count > 0; no default-vault access was observed."
+        "action": "Seeded the approved validation vault `default` with a known preference, started the local gateway/frontdoor validation stack, then asked a recall-dependent claweb question without manually invoking a Muninn tool.",
+        "observed": "Assistant answered using the seeded preference; gateway logs showed auto recall hit and injected_count > 0 while the run stayed within the approved validation-vault boundary."
       }
     ]
   },
@@ -96,7 +96,7 @@ Use this skill for features that modify PicoClaw's Go-based agent/runtime behavi
 
 ## When to Return to Orchestrator
 
-- The feature requires writing to the default Muninn vault or any non-claweb channel to proceed.
-- The dedicated test vault cannot be written or validated and there is no safe code-only fallback.
+- The feature requires writing to any Muninn vault other than the approved validation vault `default`, or any non-claweb channel, to proceed.
+- The approved validation vault `default` cannot be written or validated and there is no safe code-only fallback.
 - Claweb validation requires changes in the sibling `../claweb` repo beyond the mission's approved validation harness usage.
 - The needed behavior would require a provider-adapter rewrite or a scope expansion not covered by the current feature list.
