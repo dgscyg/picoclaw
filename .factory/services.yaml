@@ -1,7 +1,7 @@
 commands:
   install: sh ./.factory/init.sh
   test: go test -p 3 ./pkg/agent ./pkg/config ./pkg/mcp ./pkg/muninndb ./pkg/tools ./pkg/channels/claweb -skip "TestShellTool_(DevNullAllowed|FileURISandboxing|URLBypassPrevented)" -count=1
-  lint: golangci-lint run
+  lint: node ./.factory/scripts/lint-changed.mjs
   claweb_e2e: node ./.factory/scripts/claweb-e2e.mjs --base http://127.0.0.1:18081 --passphrase change-me --clientId validator-client --userId user-guest-a --message "reply with exactly pong"
 
 services:
