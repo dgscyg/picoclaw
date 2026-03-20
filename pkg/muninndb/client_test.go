@@ -64,6 +64,12 @@ func TestClientActivate(t *testing.T) {
 				if len(req.Context) != 1 || req.Context[0] != "recent project decisions" {
 					t.Fatalf("context = %v", req.Context)
 				}
+				if !req.IncludeWhy {
+					t.Fatal("expected include_why to be enabled")
+				}
+				if req.BriefMode != activateBriefModeReason {
+					t.Fatalf("brief_mode = %q, want %q", req.BriefMode, activateBriefModeReason)
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.statusCode)
 				w.Write([]byte(tt.body))

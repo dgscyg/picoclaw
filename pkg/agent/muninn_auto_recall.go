@@ -90,6 +90,11 @@ func (al *AgentLoop) runMuninnAutoRecall(ctx context.Context, opts processOption
 	if !ok {
 		return MuninnProxyResult{Operation: MuninnProxyOperationRecall, Status: MuninnProxyStatusSkipped}
 	}
+	if cached, cacheReason, ok := al.lookupMuninnRecallCache(plan); ok {
+		LogMuninnProxyInfo(MuninnProxyLogEventCacheHit, plan, &cached, nil, map[string]any{"cache_reason": cacheReason})
+		return cached
+	}
+	LogMuninnProxyDebug(MuninnProxyLogEventCacheMiss, plan, nil, nil, nil)
 
 	LogMuninnProxyDebug(MuninnProxyLogEventAutoRecallStart, plan, nil, nil, nil)
 	start := time.Now()
@@ -107,21 +112,46 @@ func (al *AgentLoop) runMuninnAutoRecall(ctx context.Context, opts processOption
 		}
 		if isMuninnAutoRecallTimeout(err) {
 			result.Status = MuninnProxyStatusTimeout
+			al.invalidateMuninnRecallCache(plan.SessionKey)
 			LogMuninnProxyWarn(MuninnProxyLogEventAutoRecallTimeout, plan, &result, err, nil)
 			return result
 		}
 		result.Status = MuninnProxyStatusError
+		al.invalidateMuninnRecallCache(plan.SessionKey)
 		LogMuninnProxyWarn(MuninnProxyLogEventAutoRecallError, plan, &result, err, nil)
 		return result
 	}
 
 	result := buildMuninnAutoRecallResult(plan, resp, time.Since(start))
 	if result.Status == MuninnProxyStatusMiss {
+		al.invalidateMuninnRecallCache(plan.SessionKey)
 		LogMuninnProxyInfo(MuninnProxyLogEventAutoRecallMiss, plan, &result, nil, nil)
 		return result
 	}
+	al.storeMuninnRecallCache(plan, result)
 	LogMuninnProxyInfo(MuninnProxyLogEventAutoRecallHit, plan, &result, nil, nil)
 	return result
+}
+
+func (al *AgentLoop) lookupMuninnRecallCache(plan MuninnProxyPlan) (MuninnProxyResult, string, bool) {
+	if al == nil || al.recallCache == nil {
+		return MuninnProxyResult{}, "", false
+	}
+	return al.recallCache.lookup(plan)
+}
+
+func (al *AgentLoop) storeMuninnRecallCache(plan MuninnProxyPlan, result MuninnProxyResult) {
+	if al == nil || al.recallCache == nil {
+		return
+	}
+	al.recallCache.store(plan, result)
+}
+
+func (al *AgentLoop) invalidateMuninnRecallCache(sessionKey string) {
+	if al == nil || al.recallCache == nil {
+		return
+	}
+	al.recallCache.invalidate(sessionKey)
 }
 
 func newMuninnAutoRecallClient(cfg *config.MuninnDBConfig) *muninndb.Client {

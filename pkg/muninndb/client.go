@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const activateBriefModeReason = "reason"
+
 const defaultTimeout = 30 * time.Second
 
 // Client is a REST client for MuninnDB.
@@ -56,6 +58,8 @@ func (c *Client) Activate(ctx context.Context, query string, limit int) (*Activa
 		Vault:      c.vault,
 		Context:    []string{query},
 		MaxResults: limit,
+		IncludeWhy: true,
+		BriefMode:  activateBriefModeReason,
 	}
 
 	var resp ActivateResponse

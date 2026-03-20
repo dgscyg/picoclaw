@@ -170,6 +170,131 @@ func TestProcessDirectWithChannel_MuninnAutoRecallInjectsRelevantMemoryWithoutPe
 	}
 }
 
+func TestProcessDirectWithChannel_MuninnAutoRecallReusesCacheForCloselyRelatedTurns(t *testing.T) {
+	tmpDir := t.TempDir()
+	activateCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/activate":
+			activateCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(muninndb.ActivateResponse{
+				QueryID:    "query-cache-1",
+				TotalFound: 1,
+				Activations: []muninndb.ActivationItem{{
+					ID:      "eng-cache-1",
+					Concept: "preference",
+					Content: "Favorite editor: helix.",
+					Score:   0.98,
+				}},
+			})
+		case "/api/engrams":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"eng-write","created_at":123}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := &muninnAwareProvider{}
+	al := NewAgentLoop(testMuninnConfig(tmpDir, server.URL), bus.NewMessageBus(), provider)
+
+	response1, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"What's my favorite editor?",
+		"session-cache",
+		"claweb",
+		"room-1",
+	)
+	if err != nil {
+		t.Fatalf("first ProcessDirectWithChannel() error = %v", err)
+	}
+	response2, err := al.ProcessDirectWithChannel(
+		context.Background(),
+		"Remind me again which editor I prefer for code edits.",
+		"session-cache",
+		"claweb",
+		"room-1",
+	)
+	if err != nil {
+		t.Fatalf("second ProcessDirectWithChannel() error = %v", err)
+	}
+	if response1 != "Your favorite editor is helix." || response2 != "Your favorite editor is helix." {
+		t.Fatalf("unexpected responses: %q / %q", response1, response2)
+	}
+	if activateCalls != 2 {
+		t.Fatalf("activateCalls = %d, want 2", activateCalls)
+	}
+	plan, ok := al.buildMuninnAutoRecallPlan(processOptions{
+		SessionKey:  "session-cache",
+		Channel:     "claweb",
+		ChatID:      "room-1",
+		SenderID:    "cron",
+		UserMessage: "Remind me again which editor I prefer for code edits.",
+	})
+	if !ok {
+		t.Fatal("expected test follow-up plan to be created")
+	}
+	if _, _, ok := al.lookupMuninnRecallCache(plan); !ok {
+		t.Fatal("expected closely related follow-up query to be cached after refresh")
+	}
+}
+
+func TestProcessDirectWithChannel_MuninnAutoRecallRefreshesCacheOnMaterialContextChange(t *testing.T) {
+	tmpDir := t.TempDir()
+	activateCalls := 0
+	queries := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/activate":
+			activateCalls++
+			defer r.Body.Close()
+			var req muninndb.ActivateRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode activate request: %v", err)
+			}
+			queries = append(queries, strings.Join(req.Context, "\n"))
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(muninndb.ActivateResponse{
+				QueryID:    "query-refresh",
+				TotalFound: 1,
+				Activations: []muninndb.ActivationItem{{
+					ID:      "eng-cache-2",
+					Concept: "preference",
+					Content: "Favorite editor: helix.",
+					Score:   0.98,
+				}},
+			})
+		case "/api/engrams":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"eng-write","created_at":123}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := &muninnAwareProvider{}
+	al := NewAgentLoop(testMuninnConfig(tmpDir, server.URL), bus.NewMessageBus(), provider)
+
+	if _, err := al.ProcessDirectWithChannel(context.Background(), "What's my favorite editor?", "session-cache-refresh", "claweb", "room-1"); err != nil {
+		t.Fatalf("first ProcessDirectWithChannel() error = %v", err)
+	}
+	if _, err := al.ProcessDirectWithChannel(context.Background(), "What's my deployment region?", "session-cache-refresh", "claweb", "room-1"); err != nil {
+		t.Fatalf("second ProcessDirectWithChannel() error = %v", err)
+	}
+	if activateCalls != 2 {
+		t.Fatalf("activateCalls = %d, want 2", activateCalls)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("queries = %d, want 2", len(queries))
+	}
+	if queries[0] == queries[1] {
+		t.Fatalf("expected refreshed activate query, got identical queries: %q", queries[0])
+	}
+}
+
 func TestFormatMuninnAutoRecallPromptBlock_BoundsAndSummarizesMemories(t *testing.T) {
 	marker := "SHOULD_NOT_APPEAR_AFTER_TRUNCATION"
 	items := []MuninnProxyMemoryItem{

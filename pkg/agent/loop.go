@@ -49,6 +49,7 @@ type AgentLoop struct {
 	cmdRegistry    *commands.Registry
 	mcp            mcpRuntime
 	mu             sync.RWMutex
+	recallCache    *muninnRecallCache
 	// Track active requests for safe provider cleanup
 	activeRequests sync.WaitGroup
 }
@@ -116,6 +117,7 @@ func NewAgentLoop(
 		cfg:         cfg,
 		registry:    registry,
 		state:       stateManager,
+		recallCache: newMuninnRecallCache(),
 		summarizing: sync.Map{},
 		fallback:    fallbackChain,
 		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
