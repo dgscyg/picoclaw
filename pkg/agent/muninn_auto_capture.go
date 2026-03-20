@@ -21,17 +21,29 @@ const (
 )
 
 var (
+	muninnZHLike                = "\u559c\u6b22"
+	muninnZHDislike             = "\u4e0d\u559c\u6b22"
+	muninnZHPrefer              = "\u504f\u597d"
+	muninnZHPreferMore          = "\u66f4\u559c\u6b22"
+	muninnZHPlease              = "\u8bf7"
+	muninnZHDoNot               = "\u4e0d\u8981"
+	muninnZHDont                = "\u522b"
+	muninnZHOnly                = "\u53ea\u7528"
+	muninnZHOnlyAlt             = "\u4ec5\u7528"
+	muninnZHMust                = "\u5fc5\u987b"
+	muninnZHCertainly           = "\u52a1\u5fc5"
+	muninnZHPunctuatedSentence  = "\u3002\uff01\uff1f\uff1b\uff0c"
 	muninnExplicitPreferenceRe = regexp.MustCompile(
-		`(?i)\b(?:i\s+(?:really\s+)?(?:like|prefer|love)|my\s+(?:favorite|preferred))\b`,
+		`(?i)(?:\bi\s+(?:really\s+)?(?:like|prefer|love)\b|\bmy\s+(?:favorite|preferred)\b|\x{6211}(?:\x{771f}?\x{7684})?(?:\x{559c}\x{6b22}|\x{504f}\x{597d}|\x{66f4}\x{559c}\x{6b22}|\x{4e0d}\x{559c}\x{6b22}))`,
 	)
 	muninnExplicitPreferenceStatementRe = regexp.MustCompile(
-		`(?i)\b(?:my\s+(?:preferred|favorite)\s+[^.?!,;]+\s+is|i\s+want\s+[^.?!,;]+\s+(?:by default|going forward|from now on))\b`,
+		`(?i)\b(?:my\s+(?:preferred|favorite)\s+[^.?!,;]+\s+is|i\s+want\s+[^.?!,;]+\s+(?:by default|going forward|from now on))\b|\x{6211}(?:\x{5e0c}\x{671b}|\x{60f3}\x{8981})[^\x{3002}\x{ff01}\x{ff1f}!?]{0,40}(?:\x{9ed8}\x{8ba4}|\x{4ee5}\x{540e}|\x{4ece}\x{73b0}\x{5728}\x{8d77})`,
 	)
 	muninnConstraintLeadRe = regexp.MustCompile(
-		`(?i)^\s*(?:please\s+)?(?:do not|don't|never|always|only|must|avoid|use)\b`,
+		`(?i)^\s*(?:please\s+)?(?:do not|don't|never|always|only|must|avoid|use)\b|^\s*(?:\x{8bf7}|\x{4e0d}\x{8981}|\x{522b}|\x{53ea}\x{80fd}|\x{5fc5}\x{987b}|\x{52a1}\x{5fc5}|\x{53ea}\x{7528}|\x{4ec5}\x{7528})`,
 	)
 	muninnConstraintSentenceRe = regexp.MustCompile(
-		`(?i)\b(?:please\s+)?(?:do not|don't|never|always|only|must|avoid|use|keep|limit)\b`,
+		`(?i)\b(?:please\s+)?(?:do not|don't|never|always|only|must|avoid|use|keep|limit)\b|(?:\x{8bf7}|\x{4e0d}\x{8981}|\x{522b}|\x{53ea}\x{80fd}|\x{5fc5}\x{987b}|\x{52a1}\x{5fc5}|\x{53ea}\x{7528}|\x{4ec5}\x{7528})`,
 	)
 	muninnDecisionLeadRe = regexp.MustCompile(
 		`(?i)^\s*(?:we|let'?s|the project|for this project)\b.*\b(?:will|won't|should|must|decided|decision|standardize|use)\b`,
@@ -42,6 +54,7 @@ var (
 	muninnContactLeadRe = regexp.MustCompile(
 		`(?i)\b(?:call me|my name is|you can reach|contact(?: mapping)?|alias is)\b`,
 	)
+	muninnCrossLingualAmbiguousRe = regexp.MustCompile(`(?i)(?:\x{53ef}\x{80fd}|\x{4e5f}\x{8bb8}|\x{5927}\x{6982}|\x{5dee}\x{4e0d}\x{591a}|\x{5148}\x{8fd9}\x{6837}|\x{6682}\x{65f6}|\x{56de}\x{5934}|\x{4ee5}\x{540e}\x{518d}\x{8bf4})`)
 )
 
 type muninnCaptureCategory string
@@ -276,10 +289,11 @@ func extractMuninnAutoCaptureCandidate(opts processOptions) (*muninnAutoCaptureC
 		return nil, "message did not match durable capture categories"
 	}
 
-	if len(strings.Fields(trimmed)) < 2 {
+	if len(strings.Fields(trimmed)) < 2 && len([]rune(trimmed)) < 6 {
 		return nil, "message too short for durable capture"
 	}
-	if !(strings.Contains(trimmed, ".") || strings.Contains(trimmed, ";") || strings.Contains(trimmed, ",") || len([]rune(trimmed)) >= 12) {
+	if !(strings.Contains(trimmed, ".") || strings.Contains(trimmed, ";") || strings.Contains(trimmed, ",") ||
+		strings.ContainsAny(trimmed, muninnZHPunctuatedSentence) || len([]rune(trimmed)) >= 12) {
 		return nil, "message lacks durable detail"
 	}
 
@@ -386,6 +400,9 @@ func muninnAutoCaptureConfidence(message string, category muninnCaptureCategory)
 	if strings.Contains(lower, "?") {
 		return 0, false
 	}
+	if muninnCrossLingualAmbiguousRe.MatchString(trimmed) {
+		return 0, false
+	}
 	for _, marker := range []string{"maybe", "might", "probably", "perhaps", "i guess", "not sure", "kind of", "sort of", "temporarily"} {
 		if strings.Contains(lower, marker) {
 			return 0, false
@@ -419,10 +436,20 @@ func muninnAutoCaptureConfidence(message string, category muninnCaptureCategory)
 		strings.Contains(lower, "call me") {
 		score += 0.08
 	}
+	if strings.Contains(trimmed, muninnZHLike) || strings.Contains(trimmed, muninnZHDislike) ||
+		strings.Contains(trimmed, muninnZHPrefer) || strings.Contains(trimmed, muninnZHPreferMore) {
+		score += 0.12
+	}
 	if strings.Contains(lower, "use ") || strings.HasPrefix(lower, "use ") ||
 		strings.Contains(lower, "do not") || strings.Contains(lower, "don't") ||
 		strings.Contains(lower, "avoid") || strings.Contains(lower, "keep ") {
 		score += 0.08
+	}
+	if strings.Contains(trimmed, muninnZHPlease) || strings.Contains(trimmed, muninnZHDoNot) ||
+		strings.Contains(trimmed, muninnZHDont) || strings.Contains(trimmed, muninnZHOnly) ||
+		strings.Contains(trimmed, muninnZHOnlyAlt) || strings.Contains(trimmed, muninnZHMust) ||
+		strings.Contains(trimmed, muninnZHCertainly) {
+		score += 0.12
 	}
 	if strings.Contains(lower, "preferred") || strings.Contains(lower, "will use") ||
 		strings.Contains(lower, "uses ") || strings.Contains(lower, "use sqlite") {

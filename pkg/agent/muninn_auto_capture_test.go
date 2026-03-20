@@ -8,12 +8,27 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/muninndb"
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
+
+func zh(s string) string {
+	b := make([]byte, 0, len(s)*3)
+	for _, r := range s {
+		if r < utf8.RuneSelf {
+			b = append(b, byte(r))
+			continue
+		}
+		buf := make([]byte, 4)
+		n := utf8.EncodeRune(buf, r)
+		b = append(b, buf[:n]...)
+	}
+	return string(b)
+}
 
 type captureTestProvider struct {
 	response string
@@ -278,6 +293,8 @@ func TestExtractMuninnAutoCaptureCandidate_AcceptsPlainDurablePreferences(t *tes
 		"I prefer dark mode for this repo.",
 		"My preferred editor is Helix.",
 		"I like concise summaries for code reviews.",
+		zh("\u6211\u4e0d\u559c\u6b22\u51fa\u5dee\u3002"),
+		zh("\u6211\u559c\u6b22\u7528\u6df1\u8272\u6a21\u5f0f\u3002"),
 	}
 
 	for _, message := range tests {
@@ -291,6 +308,71 @@ func TestExtractMuninnAutoCaptureCandidate_AcceptsPlainDurablePreferences(t *tes
 			}
 			if candidate.Concept != "user_preference" || candidate.TypeLabel != "preference" {
 				t.Fatalf("candidate = %+v", candidate)
+			}
+		})
+	}
+}
+
+func TestExtractMuninnAutoCaptureCandidate_AcceptsCrossLingualDurableSignals(t *testing.T) {
+	tests := []struct {
+		name      string
+		message   string
+		concept   string
+		typeLabel string
+	}{
+		{
+			name:      "chinese direct negative preference",
+			message:   zh("\u6211\u4e0d\u559c\u6b22\u51fa\u5dee\u3002"),
+			concept:   "user_preference",
+			typeLabel: "preference",
+		},
+		{
+			name:      "chinese plain preference statement",
+			message:   zh("\u6211\u559c\u6b22\u7528\u6df1\u8272\u6a21\u5f0f\u3002"),
+			concept:   "user_preference",
+			typeLabel: "preference",
+		},
+		{
+			name:      "chinese whole utterance constraint",
+			message:   zh("\u8fd9\u4e2a\u4ed3\u5e93\u91cc\u8bf7\u53ea\u7528 pnpm\u3002"),
+			concept:   "explicit_constraint",
+			typeLabel: "constraint",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate, reason := extractMuninnAutoCaptureCandidate(processOptions{
+				UserMessage: tt.message,
+				Channel:     "claweb",
+			})
+			if candidate == nil {
+				t.Fatalf("expected candidate, got nil with reason %q", reason)
+			}
+			if candidate.Concept != tt.concept || candidate.TypeLabel != tt.typeLabel {
+				t.Fatalf("candidate = %+v", candidate)
+			}
+		})
+	}
+}
+
+func TestExtractMuninnAutoCaptureCandidate_DropsCrossLingualNoise(t *testing.T) {
+	tests := []string{
+		zh("\u53ef\u80fd\u5427\u3002"),
+		zh("\u4e5f\u8bb8\u4ee5\u540e\u518d\u8bf4\u3002"),
+	}
+
+	for _, message := range tests {
+		t.Run(message, func(t *testing.T) {
+			candidate, reason := extractMuninnAutoCaptureCandidate(processOptions{
+				UserMessage: message,
+				Channel:     "claweb",
+			})
+			if candidate != nil {
+				t.Fatalf("expected nil candidate, got %+v", candidate)
+			}
+			if reason == "" {
+				t.Fatal("expected drop reason")
 			}
 		})
 	}
