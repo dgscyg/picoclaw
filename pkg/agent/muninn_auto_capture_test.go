@@ -167,6 +167,24 @@ func TestExtractMuninnAutoCaptureCandidate_ClassifiesStableSemantics(t *testing.
 			typeLabel: "preference",
 		},
 		{
+			name:      "concise explicit constraint",
+			message:   "Use pnpm.",
+			concept:   "explicit_constraint",
+			typeLabel: "constraint",
+		},
+		{
+			name:      "concise explicit decision",
+			message:   "We use SQLite.",
+			concept:   "project_decision",
+			typeLabel: "decision",
+		},
+		{
+			name:      "concise contact mapping",
+			message:   "Call me Alex.",
+			concept:   "contact_mapping",
+			typeLabel: "contact_mapping",
+		},
+		{
 			name:      "constraint",
 			message:   "Please do not use yarn in this repository from now on.",
 			concept:   "explicit_constraint",
@@ -253,6 +271,29 @@ func TestExtractMuninnAutoCaptureCandidate_DropsLowConfidenceNoise(t *testing.T)
 			t.Fatalf("reason = %q", reason)
 		}
 	})
+}
+
+func TestExtractMuninnAutoCaptureCandidate_AcceptsPlainDurablePreferences(t *testing.T) {
+	tests := []string{
+		"I prefer dark mode for this repo.",
+		"My preferred editor is Helix.",
+		"I like concise summaries for code reviews.",
+	}
+
+	for _, message := range tests {
+		t.Run(message, func(t *testing.T) {
+			candidate, reason := extractMuninnAutoCaptureCandidate(processOptions{
+				UserMessage: message,
+				Channel:     "claweb",
+			})
+			if candidate == nil {
+				t.Fatalf("expected candidate, got nil with reason %q", reason)
+			}
+			if candidate.Concept != "user_preference" || candidate.TypeLabel != "preference" {
+				t.Fatalf("candidate = %+v", candidate)
+			}
+		})
+	}
 }
 
 func TestMuninnCaptureLooksDuplicate_FuzzyMatchPreventsNearDuplicates(t *testing.T) {

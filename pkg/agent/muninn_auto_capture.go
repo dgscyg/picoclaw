@@ -18,7 +18,6 @@ const (
 	muninnAutoCaptureTimeout         = 30 * time.Second
 	muninnAutoCaptureActivateLimit   = 5
 	muninnAutoCaptureDuplicateCutoff = 0.92
-	muninnAutoCaptureMinWordCount    = 5
 )
 
 var (
@@ -240,13 +239,7 @@ func extractMuninnAutoCaptureCandidate(opts processOptions) (*muninnAutoCaptureC
 	if message == "" {
 		return nil, "empty user message"
 	}
-	if len(strings.Fields(message)) < muninnAutoCaptureMinWordCount {
-		return nil, "message too short for durable capture"
-	}
 	trimmed := strings.TrimSpace(message)
-	if !(strings.Contains(trimmed, ".") || strings.Contains(trimmed, ";") || strings.Contains(trimmed, ",") || len([]rune(trimmed)) >= 28) {
-		return nil, "message lacks durable detail"
-	}
 
 	candidate := muninnAutoCaptureCandidate{
 		SessionKey: strings.TrimSpace(opts.SessionKey),
@@ -281,6 +274,13 @@ func extractMuninnAutoCaptureCandidate(opts processOptions) (*muninnAutoCaptureC
 		candidate.Stability = 0.9
 	default:
 		return nil, "message did not match durable capture categories"
+	}
+
+	if len(strings.Fields(trimmed)) < 2 {
+		return nil, "message too short for durable capture"
+	}
+	if !(strings.Contains(trimmed, ".") || strings.Contains(trimmed, ";") || strings.Contains(trimmed, ",") || len([]rune(trimmed)) >= 12) {
+		return nil, "message lacks durable detail"
 	}
 
 	if confidence, ok := muninnAutoCaptureConfidence(trimmed, candidate.Category); !ok {
@@ -414,8 +414,14 @@ func muninnAutoCaptureConfidence(message string, category muninnCaptureCategory)
 		score += 0.02
 	}
 	if strings.Contains(lower, "decided") || strings.Contains(lower, "prefer") ||
+		strings.Contains(lower, "like") ||
 		strings.Contains(lower, "favorite") ||
 		strings.Contains(lower, "call me") {
+		score += 0.08
+	}
+	if strings.Contains(lower, "use ") || strings.HasPrefix(lower, "use ") ||
+		strings.Contains(lower, "do not") || strings.Contains(lower, "don't") ||
+		strings.Contains(lower, "avoid") || strings.Contains(lower, "keep ") {
 		score += 0.08
 	}
 	if strings.Contains(lower, "preferred") || strings.Contains(lower, "will use") ||
@@ -428,6 +434,12 @@ func muninnAutoCaptureConfidence(message string, category muninnCaptureCategory)
 	if category == muninnCaptureCategoryPreference &&
 		(strings.Contains(lower, "my preferred") || strings.Contains(lower, "my favorite")) {
 		score += 0.06
+	}
+	if category == muninnCaptureCategoryPreference {
+		score += 0.04
+	}
+	if category == muninnCaptureCategoryContact {
+		score += 0.08
 	}
 	score = math.Min(score, 0.99)
 	if score < 0.9 {
