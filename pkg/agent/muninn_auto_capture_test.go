@@ -179,6 +179,24 @@ func TestExtractMuninnAutoCaptureCandidate_ClassifiesStableSemantics(t *testing.
 			typeLabel: "decision",
 		},
 		{
+			name:      "full sentence decision",
+			message:   "For release builds, the project will use SQLite as the local metadata store.",
+			concept:   "project_decision",
+			typeLabel: "decision",
+		},
+		{
+			name:      "full sentence constraint",
+			message:   "During validation runs, please only use claweb and avoid every other channel.",
+			concept:   "explicit_constraint",
+			typeLabel: "constraint",
+		},
+		{
+			name:      "explicit preference statement",
+			message:   "My preferred code review style is concise summaries with bullet points.",
+			concept:   "user_preference",
+			typeLabel: "preference",
+		},
+		{
 			name:      "contact",
 			message:   "Call me Alex in project coordination messages going forward.",
 			concept:   "contact_mapping",
@@ -249,6 +267,21 @@ func TestMuninnCaptureLooksDuplicate_FuzzyMatchPreventsNearDuplicates(t *testing
 	}
 	if !muninnCaptureLooksDuplicate(item, candidate) {
 		t.Fatal("expected fuzzy duplicate match")
+	}
+}
+
+func TestBuildMuninnCaptureDedupeQuery_UsesStableFactFingerprint(t *testing.T) {
+	candidate := muninnAutoCaptureCandidate{
+		Concept:     "explicit_constraint",
+		Content:     "Please only use claweb for validation runs.",
+		Fingerprint: "explicit_constraint|please only use claweb for validation runs.",
+	}
+	query := buildMuninnCaptureDedupeQuery(candidate)
+	if !strings.Contains(query, "explicit_constraint|please only use claweb for validation runs.") {
+		t.Fatalf("query = %q", query)
+	}
+	if !strings.Contains(query, "please only use claweb for validation runs.") {
+		t.Fatalf("query = %q", query)
 	}
 }
 

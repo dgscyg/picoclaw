@@ -25,11 +25,20 @@ var (
 	muninnExplicitPreferenceRe = regexp.MustCompile(
 		`(?i)\b(?:i\s+(?:really\s+)?(?:like|prefer|love)|my\s+(?:favorite|preferred))\b`,
 	)
+	muninnExplicitPreferenceStatementRe = regexp.MustCompile(
+		`(?i)\b(?:my\s+(?:preferred|favorite)\s+[^.?!,;]+\s+is|i\s+want\s+[^.?!,;]+\s+(?:by default|going forward|from now on))\b`,
+	)
 	muninnConstraintLeadRe = regexp.MustCompile(
 		`(?i)^\s*(?:please\s+)?(?:do not|don't|never|always|only|must|avoid|use)\b`,
 	)
+	muninnConstraintSentenceRe = regexp.MustCompile(
+		`(?i)\b(?:please\s+)?(?:do not|don't|never|always|only|must|avoid|use|keep|limit)\b`,
+	)
 	muninnDecisionLeadRe = regexp.MustCompile(
 		`(?i)^\s*(?:we|let'?s|the project|for this project)\b.*\b(?:will|won't|should|must|decided|decision|standardize|use)\b`,
+	)
+	muninnDecisionSentenceRe = regexp.MustCompile(
+		`(?i)\b(?:we|team|project|repo|repository)\b[^.?!]*(?:decided|decision|standardize|standardized|will use|won't use|should use|must use|uses?)\b`,
 	)
 	muninnContactLeadRe = regexp.MustCompile(
 		`(?i)\b(?:call me|my name is|you can reach|contact(?: mapping)?|alias is)\b`,
@@ -246,24 +255,24 @@ func extractMuninnAutoCaptureCandidate(opts processOptions) (*muninnAutoCaptureC
 	}
 
 	switch {
-	case muninnExplicitPreferenceRe.MatchString(trimmed):
-		candidate.Category = muninnCaptureCategoryPreference
-		candidate.Concept = "user_preference"
-		candidate.TypeLabel = "preference"
-		candidate.Confidence = 0.96
-		candidate.Stability = 0.93
-	case muninnConstraintLeadRe.MatchString(trimmed):
-		candidate.Category = muninnCaptureCategoryConstraint
-		candidate.Concept = "explicit_constraint"
-		candidate.TypeLabel = "constraint"
-		candidate.Confidence = 0.97
-		candidate.Stability = 0.97
-	case muninnDecisionLeadRe.MatchString(trimmed):
+	case muninnDecisionLeadRe.MatchString(trimmed) || muninnDecisionSentenceRe.MatchString(trimmed):
 		candidate.Category = muninnCaptureCategoryDecision
 		candidate.Concept = "project_decision"
 		candidate.TypeLabel = "decision"
 		candidate.Confidence = 0.95
 		candidate.Stability = 0.95
+	case muninnExplicitPreferenceRe.MatchString(trimmed) || muninnExplicitPreferenceStatementRe.MatchString(trimmed):
+		candidate.Category = muninnCaptureCategoryPreference
+		candidate.Concept = "user_preference"
+		candidate.TypeLabel = "preference"
+		candidate.Confidence = 0.96
+		candidate.Stability = 0.93
+	case muninnConstraintLeadRe.MatchString(trimmed) || muninnConstraintSentenceRe.MatchString(trimmed):
+		candidate.Category = muninnCaptureCategoryConstraint
+		candidate.Concept = "explicit_constraint"
+		candidate.TypeLabel = "constraint"
+		candidate.Confidence = 0.97
+		candidate.Stability = 0.97
 	case muninnContactLeadRe.MatchString(trimmed):
 		candidate.Category = muninnCaptureCategoryContact
 		candidate.Concept = "contact_mapping"
@@ -318,7 +327,7 @@ func muninnAutoCaptureDuplicateExists(
 	plan MuninnProxyPlan,
 	candidate muninnAutoCaptureCandidate,
 ) (bool, error) {
-	query := truncateRunes(candidate.Concept+"\n"+candidate.Content, muninnAutoRecallQueryLimit)
+	query := truncateRunes(buildMuninnCaptureDedupeQuery(candidate), muninnAutoRecallQueryLimit)
 	resp, err := client.Activate(ctx, query, muninnAutoCaptureActivateLimit)
 	if err != nil {
 		return false, err
@@ -330,6 +339,19 @@ func muninnAutoCaptureDuplicateExists(
 	}
 	_ = plan
 	return false, nil
+}
+
+func buildMuninnCaptureDedupeQuery(candidate muninnAutoCaptureCandidate) string {
+	content := normalizeWhitespace(strings.ToLower(candidate.Content))
+	fingerprint := normalizeWhitespace(strings.ToLower(candidate.Fingerprint))
+	parts := []string{candidate.Concept}
+	if fingerprint != "" {
+		parts = append(parts, fingerprint)
+	}
+	if content != "" && content != fingerprint {
+		parts = append(parts, content)
+	}
+	return strings.Join(compactStrings(parts), "\n")
 }
 
 func muninnCaptureLooksDuplicate(
@@ -396,8 +418,16 @@ func muninnAutoCaptureConfidence(message string, category muninnCaptureCategory)
 		strings.Contains(lower, "call me") {
 		score += 0.08
 	}
+	if strings.Contains(lower, "preferred") || strings.Contains(lower, "will use") ||
+		strings.Contains(lower, "uses ") || strings.Contains(lower, "use sqlite") {
+		score += 0.08
+	}
 	if category == muninnCaptureCategoryDecision || category == muninnCaptureCategoryConstraint {
 		score += 0.04
+	}
+	if category == muninnCaptureCategoryPreference &&
+		(strings.Contains(lower, "my preferred") || strings.Contains(lower, "my favorite")) {
+		score += 0.06
 	}
 	score = math.Min(score, 0.99)
 	if score < 0.9 {
