@@ -30,7 +30,8 @@ type MuninnDBConfig struct {
 	MCPEndpoint  string `json:"mcp_endpoint"`
 	RESTEndpoint string `json:"rest_endpoint,omitempty"`
 	Vault        string `json:"vault"`
-	APIKey       string `json:"api_key"`
+	RESTAPIKey   string `json:"rest_api_key"`
+	MCPAPIKey    string `json:"mcp_api_key"`
 	Timeout      string `json:"timeout"`
 }
 
@@ -89,7 +90,8 @@ func (c *MemoryConfig) ExpandEnvVars() {
 		c.MuninnDB.MCPEndpoint = expandEnvVars(c.MuninnDB.MCPEndpoint)
 		c.MuninnDB.RESTEndpoint = expandEnvVars(c.MuninnDB.RESTEndpoint)
 		c.MuninnDB.Vault = expandEnvVars(c.MuninnDB.Vault)
-		c.MuninnDB.APIKey = expandEnvVars(c.MuninnDB.APIKey)
+		c.MuninnDB.RESTAPIKey = expandEnvVars(c.MuninnDB.RESTAPIKey)
+		c.MuninnDB.MCPAPIKey = expandEnvVars(c.MuninnDB.MCPAPIKey)
 		c.MuninnDB.Timeout = expandEnvVars(c.MuninnDB.Timeout)
 	}
 }
@@ -104,6 +106,12 @@ func (c *MemoryConfig) Validate() error {
 	case MemoryProviderMuninnDB:
 		if c.MuninnDB == nil {
 			return fmt.Errorf("memory.muninndb is required when memory.provider is %q", MemoryProviderMuninnDB)
+		}
+		if strings.TrimSpace(c.MuninnDB.RESTAPIKey) == "" {
+			return fmt.Errorf("memory.muninndb.rest_api_key is required when memory.provider is %q", MemoryProviderMuninnDB)
+		}
+		if strings.TrimSpace(c.MuninnDB.MCPAPIKey) == "" {
+			return fmt.Errorf("memory.muninndb.mcp_api_key is required when memory.provider is %q", MemoryProviderMuninnDB)
 		}
 		if c.MuninnDB.ResolvedMCPEndpoint() == "" {
 			return fmt.Errorf("memory.muninndb.mcp_endpoint is required when memory.provider is %q", MemoryProviderMuninnDB)
@@ -144,7 +152,7 @@ func EnsureMuninnMCPConfig(cfg *Config) {
 			server.Type = existing.Type
 		}
 	}
-	if token := strings.TrimSpace(cfg.Memory.MuninnDB.APIKey); token != "" {
+	if token := strings.TrimSpace(cfg.Memory.MuninnDB.MCPAPIKey); token != "" {
 		server.Headers = map[string]string{"Authorization": "Bearer " + token}
 	}
 	cfg.Tools.MCP.Servers[DefaultMuninnMCPName] = server

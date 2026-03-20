@@ -873,6 +873,15 @@ func LoadConfig(path string) (*Config, error) {
 	if len(tmp.ModelList) > 0 {
 		cfg.ModelList = nil
 	}
+	if strings.Contains(string(data), `"api_key"`) && strings.Contains(string(data), `"muninndb"`) {
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, err
+		}
+		if legacyPath, ok := findLegacyMuninnAPIKeyPath(raw, nil); ok {
+			return nil, fmt.Errorf("legacy %s is no longer supported; use memory.muninndb.rest_api_key and memory.muninndb.mcp_api_key", legacyPath)
+		}
+	}
 
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, err
@@ -918,6 +927,32 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func findLegacyMuninnAPIKeyPath(value any, path []string) (string, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			childPath := append(path, key)
+			if key == "muninndb" {
+				if nested, ok := child.(map[string]any); ok {
+					if _, exists := nested["api_key"]; exists {
+						return strings.Join(append(childPath, "api_key"), "."), true
+					}
+				}
+			}
+			if foundPath, ok := findLegacyMuninnAPIKeyPath(child, childPath); ok {
+				return foundPath, true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if foundPath, ok := findLegacyMuninnAPIKeyPath(child, path); ok {
+				return foundPath, true
+			}
+		}
+	}
+	return "", false
 }
 
 // encryptPlaintextAPIKeys returns a copy of models with plaintext api_key values

@@ -42,7 +42,7 @@ func NewMuninnDBMemoryStore(cfg *config.MuninnDBConfig, workspace string) (*Muni
 		}
 		httpClient.Timeout = d
 	}
-	store := &MuninnDBMemoryStore{client: muninndb.NewClientWithHTTPClient(httpClient, endpoint, vault, strings.TrimSpace(cfg.APIKey)), vault: vault, fallback: NewFileMemoryStore(workspace)}
+	store := &MuninnDBMemoryStore{client: muninndb.NewClientWithHTTPClient(httpClient, endpoint, vault, strings.TrimSpace(cfg.RESTAPIKey)), vault: vault, fallback: NewFileMemoryStore(workspace)}
 	logger.InfoCF("agent", "Initialized compatibility MuninnDB memory store", map[string]any{"vault": vault, "rest_endpoint": endpoint, "mcp_endpoint": cfg.ResolvedMCPEndpoint(), "split_endpoints": cfg.HasSeparateRESTEndpoint()})
 	return store, nil
 }

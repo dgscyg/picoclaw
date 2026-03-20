@@ -164,7 +164,7 @@ func newMuninnAutoRecallClient(cfg *config.MuninnDBConfig) *muninndb.Client {
 			vault = trimmedVault
 		}
 		endpoint = cfg.ResolvedRESTEndpoint()
-		apiKey = strings.TrimSpace(cfg.APIKey)
+		apiKey = strings.TrimSpace(cfg.RESTAPIKey)
 	}
 	return muninndb.NewClientWithHTTPClient(httpClient, endpoint, vault, apiKey)
 }
