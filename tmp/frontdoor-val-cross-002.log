@@ -1,0 +1,5 @@
+[frontdoor] INFO listening {"bind":"127.0.0.1","port":18081,"staticRoot":"D:\\tmp\\claw\\claweb\\clients\\browser","loginConfig":"D:\\tmp\\claw\\claweb\\access\\frontdoor\\config\\claweb-login.json","historyDir":"D:\\tmp\\claw\\claweb\\access\\frontdoor\\data\\history","upstreamWs":"ws://127.0.0.1:18999","recent":{"limit":60,"ttlDays":7}}
+[frontdoor] INFO login_ok {"identity":"guest-a","userId":"user-guest-a","roomId":"","clientId":"guest-a"}
+[frontdoor] INFO ws_client_hello {"remote":"127.0.0.1","identity":"guest-a","userId":"user-guest-a","roomId":"","clientId":"guest-a"}
+[frontdoor] INFO upstream_open {"userId":"user-guest-a","roomId":"","clientId":"guest-a","upstream":"ws://127.0.0.1:18999"}
+[frontdoor] INFO assistant_frame {"userId":"user-guest-a","roomId":"","clientId":"guest-a","turnId":"turn-1773983835913","mergedFrames":1,"flushMode":"merged","hasText":true,"textPreview":"recovery-signal-20260320","textHasMediaToken":false,"textMediaRefCount":0,"hasMediaUrl":false,"mediaUrlsCount":0,"hasMediaDataUrl":false,"mediaType":null,"keys":["type","id","messageId","role","text"]}

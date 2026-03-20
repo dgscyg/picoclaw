@@ -1,0 +1,278 @@
+
+[1;38;2;62;93;185m██████╗ ██╗ ██████╗ ██████╗ [1;38;2;213;70;70m ██████╗██╗      █████╗ ██╗    ██╗
+[1;38;2;62;93;185m██╔══██╗██║██╔════╝██╔═══██╗[1;38;2;213;70;70m██╔════╝██║     ██╔══██╗██║    ██║
+[1;38;2;62;93;185m██████╔╝██║██║     ██║   ██║[1;38;2;213;70;70m██║     ██║     ███████║██║ █╗ ██║
+[1;38;2;62;93;185m██╔═══╝ ██║██║     ██║   ██║[1;38;2;213;70;70m██║     ██║     ██╔══██║██║███╗██║
+[1;38;2;62;93;185m██║     ██║╚██████╗╚██████╔╝[1;38;2;213;70;70m╚██████╗███████╗██║  ██║╚███╔███╔╝
+[1;38;2;62;93;185m╚═╝     ╚═╝ ╚═════╝ ╚═════╝ [1;38;2;213;70;70m ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
+ [0m
+🔍 Debug mode enabled
+[90m13:16:38[0m [32mINF[0m [1magent  instance.go:290 (agent.newMemoryProvider)[0m[36m >[0m [1mInitialized Muninn memory mode via MCP[0m [36mprovider=[0mmuninndb [36mworkspace=[0mC:\Users\杨旭/.picoclaw/workspace
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mread_file
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mwrite_file
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mlist_dir
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mexec
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0medit_file
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mappend_file
+[90m13:16:38[0m [32mINF[0m [1magent  registry.go:38 (agent.NewAgentRegistry)[0m[36m >[0m [1mCreated implicit main agent (no agents.list configured)[0m
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mweb_search
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mweb_fetch
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mmessage
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mwecom_card
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0msend_file
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mfind_skills
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0minstall_skill
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mspawn
+
+📦 Agent Status:
+  • Tools: 14 loaded
+  • Skills: 6/6 available
+[90m13:16:38[0m [32mINF[0m [1magent  gateway.go:109 (gateway.Run)[0m[36m >[0m [1mAgent initialized[0m [36mskills_available=[0m6 [36mskills_total=[0m6 [36mtools_count=[0m14
+[90m13:16:38[0m DBG [1mtools  registry.go:47 (tools.(*ToolRegistry).Register)[0m[36m >[0m Registered core tool [36mname=[0mcron
+✓ Cron service started
+[90m13:16:38[0m [32mINF[0m [1mheartbeat service.go:103 (heartbeat.(*HeartbeatService).Start)[0m[36m >[0m [1mHeartbeat service started[0m [36minterval_minutes=[0m30
+✓ Heartbeat service started
+[90m13:16:38[0m [32mINF[0m [1mmedia  store.go:237 (media.(*FileMediaStore).Start.func1)[0m[36m >[0m [1mcleanup enabled[0m [36minterval=[0m5m0s [36mmax_age=[0m30m0s
+[90m13:16:38[0m [32mINF[0m [1mchannels manager.go:237 (channels.(*Manager).initChannels)[0m[36m >[0m [1mInitializing channel manager[0m
+[90m13:16:38[0m DBG [1mchannels manager.go:205 (channels.(*Manager).initChannel)[0m[36m >[0m Attempting to initialize channel [36mchannel=[0mClaweb
+[90m13:16:38[0m [32mINF[0m [1mchannels manager.go:230 (channels.(*Manager).initChannel)[0m[36m >[0m [1mChannel enabled successfully[0m [36mchannel=[0mClaweb
+[90m13:16:38[0m [32mINF[0m [1mchannels manager.go:324 (channels.(*Manager).initChannels)[0m[36m >[0m [1mChannel initialization completed[0m [36menabled_channels=[0m1
+✓ Channels enabled: [claweb]
+[90m13:16:38[0m [32mINF[0m [1mchannels manager.go:376 (channels.(*Manager).StartAll)[0m[36m >[0m [1mStarting all channels[0m
+[90m13:16:38[0m [32mINF[0m [1mchannels manager.go:382 (channels.(*Manager).StartAll)[0m[36m >[0m [1mStarting channel[0m [36mchannel=[0mclaweb
+[90m13:16:38[0m [32mINF[0m [1mclaweb claweb.go:179 (claweb.(*ClawebChannel).Start)[0m[36m >[0m [1mCLAWeb channel started[0m [36maddr=[0m127.0.0.1:18999
+[90m13:16:38[0m [32mINF[0m [1mchannels manager.go:420 (channels.(*Manager).StartAll)[0m[36m >[0m [1mAll channels started[0m
+✓ Health endpoints available at http://127.0.0.1:18790/health and /ready
+[90m13:16:38[0m [32mINF[0m [1mchannels manager.go:607 (channels.dispatchLoop[...])[0m[36m >[0m [1mOutbound dispatcher started[0m
+[90m13:16:38[0m [32mINF[0m [1mchannels manager.go:607 (channels.dispatchLoop[...])[0m[36m >[0m [1mOutbound media dispatcher started[0m
+[90m13:16:38[0m [32mINF[0m [1mdevices service.go:58 (devices.(*Service).Start)[0m[36m >[0m [1mDevice event service disabled or no sources[0m
+✓ Gateway started on 127.0.0.1:18790
+Press Ctrl+C to stop
+[90m13:16:38[0m [32mINF[0m [1mmcp    manager.go:145 (mcp.(*Manager).LoadFromMCPConfig)[0m[36m >[0m [1mInitializing MCP servers[0m [36mcount=[0m1
+[90m13:16:38[0m [32mINF[0m [1mmcp    manager.go:245 (mcp.(*Manager).ConnectServer)[0m[36m >[0m [1mConnecting to MCP server[0m [36margs_count=[0m0 [36mcommand=[0m [36mserver=[0mmuninn
+[90m13:16:38[0m DBG [1mmcp    manager.go:279 (mcp.(*Manager).ConnectServer)[0m[36m >[0m Using SSE/HTTP transport [36mserver=[0mmuninn [36murl=[0mhttp://127.0.0.1:8750/mcp
+[90m13:16:38[0m DBG [1mmcp    manager.go:298 (mcp.(*Manager).ConnectServer)[0m[36m >[0m Added custom HTTP headers [36mheader_count=[0m1 [36mserver=[0mmuninn
+[90m13:16:38[0m [32mINF[0m [1mchannels manager.go:409 (channels.(*Manager).StartAll.func1)[0m[36m >[0m [1mShared HTTP server listening[0m [36maddr=[0m127.0.0.1:18790
+[90m13:16:38[0m [31mERR[0m [1mmcp    manager.go:189 (mcp.(*Manager).LoadFromMCPConfig.func1)[0m[36m >[0m [1mFailed to connect to MCP server[0m [36merror=[0m[31m[1m"failed to connect: calling \"initialize\": sending \"initialize\": Unauthorized"[0m[0m [36mserver=[0mmuninn
+[90m13:16:38[0m [31mERR[0m [1mmcp    manager.go:212 (mcp.(*Manager).LoadFromMCPConfig)[0m[36m >[0m [1mAll MCP servers failed to connect[0m [36mfailed=[0m1 [36mtotal=[0m1
+[90m13:16:38[0m [33mWRN[0m [1magent  loop_mcp.go:97 (agent.(*AgentLoop).ensureMCPInitialized.func1)[0m[36m >[0m [1mFailed to load MCP servers, MCP tools will not be available[0m [36merror=[0m[31m[1m"failed to connect to server muninn: failed to connect: calling \"initialize\": sending \"initialize\": Unauthorized"[0m[0m
+[90m13:16:38[0m [32mINF[0m [1mmcp    manager.go:494 (mcp.(*Manager).Close)[0m[36m >[0m [1mClosing all MCP server connections[0m [36mcount=[0m0
+[90m13:17:08[0m DBG [1mheartbeat service.go:171 (heartbeat.(*HeartbeatService).executeHeartbeat)[0m[36m >[0m Executing heartbeat
+[90m13:17:08[0m DBG [1magent  muninn_proxy_log.go:122 (agent.LogMuninnProxyDebug)[0m[36m >[0m muninn_auto_recall_start [36mchannel=[0mclaweb [36mdry_run=[0mfalse [36mevent=[0mmuninn_auto_recall_start [36mmax_items=[0m3 [36moperation=[0mrecall [36mquery_preview=[0m
+User request: # Heartbeat Check
+
+Current time: 2026-03-20 13:17:08
+
+You are a proactive AI assis… [36mround_id=[0mround-1773983828925912600-1 [36msession_key=[0mheartbeat [36mtimeout_ms=[0m30000 [36mvault=[0mdefault
+[90m13:17:09[0m [32mINF[0m [1magent  muninn_proxy_log.go:132 (agent.LogMuninnProxyInfo)[0m[36m >[0m [1mmuninn_auto_recall_hit[0m [36mcandidate_count=[0m3 [36mchannel=[0mclaweb [36mdry_run=[0mfalse [36mduration_ms=[0m108 [36mevent=[0mmuninn_auto_recall_hit [36minjected_count=[0m3 [36mitem_count=[0m3 [36mmax_items=[0m3 [36moperation=[0mrecall [36mprompt_persist=[0mfalse [36mprompt_title=[0m"Relevant Memory (Muninn Auto-Recall)" [36mquery_preview=[0m
+User request: # Heartbeat Check
+
+Current time: 2026-03-20 13:17:08
+
+You are a proactive AI assis… [36mreason=[0m"activate returned relevant memories" [36mround_id=[0mround-1773983828925912600-1 [36msession_key=[0mheartbeat [36mstatus=[0mhit [36mtimeout_ms=[0m30000 [36mvault=[0mdefault
+[90m13:17:09[0m [32mINF[0m [1magent  context.go:89 (agent.(*ContextBuilder).getIdentity)[0m[36m >[0m [1mBuilding system prompt identity[0m [36mis_muninndb=[0mtrue [36mmemory_type=[0m*agent.NoopMemoryStore
+[90m13:17:09[0m DBG [1magent  context.go:197 (agent.(*ContextBuilder).BuildSystemPromptWithCache)[0m[36m >[0m System prompt cached [36mlength=[0m6127
+[90m13:17:09[0m DBG [1magent  context.go:444 (agent.(*ContextBuilder).BuildMessages)[0m[36m >[0m System prompt built [36mcached=[0mtrue [36mdynamic_chars=[0m165 [36mhas_summary=[0mfalse [36mstatic_chars=[0m6127 [36mtotal_chars=[0m6712
+[90m13:17:09[0m DBG [1magent  context.go:455 (agent.(*ContextBuilder).BuildMessages)[0m[36m >[0m System prompt preview [36mpreview=[0m
+# picoclaw 🦞 (dev)
+
+You are picoclaw, a helpful AI assistant.
+
+## Workspace
+Your workspace is at: C:\Users\杨旭\.picoclaw\workspace
+- Skills: C:\Users\杨旭\.picoclaw\workspace/skills/{skill-name}/SKILL.md
+
+## Important Rules
+
+1. **ALWAYS use tools** - When you need to perform an action, you MUST call the appropriate tool.
+
+2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
+
+3. **Muninn Memory via MCP** - In Muninn mode, memory and recall come from the official M...
+[90m13:17:09[0m DBG [1magent  loop.go:1378 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m LLM iteration [36magent_id=[0mmain [36miteration=[0m1 [36mmax=[0m20
+[90m13:17:09[0m DBG [1magent  loop.go:1389 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m LLM request [36magent_id=[0mmain [36miteration=[0m1 [36mmax_tokens=[0m8192 [36mmessages_count=[0m2 [36mmodel=[0mglm-5 [36msystem_prompt_len=[0m6712 [36mtemperature=[0m0.7 [36mtools_count=[0m15
+[90m13:17:09[0m DBG [1magent  loop.go:1402 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m Full LLM request [36miteration=[0m1 [36mmessages_json=[0m
+[
+  [0] Role: system
+  Content: # picoclaw 🦞 (dev)
+
+You are picoclaw, a helpful AI assistant.
+
+## Workspace
+Your workspace is at: C:\Users\杨旭\.picoclaw\workspace
+- Skills: C:\Users\杨旭\.picoclaw\workspace/skills/{skill-name}/SKILL...
+
+  [1] Role: user
+  Content: # Heartbeat Check
+
+Current time: 2026-03-20 13:17:08
+
+You are a proactive AI assistant. This is a scheduled heartbeat check.
+Review the following tasks and execute any necessary actions using avail...
+
+] [36mtools_json=[0m
+[
+  [0] Type: function, Name: append_file
+      Description: Append content to the end of a file
+      Parameters: map[properties:map[content:map[description:The content to append type:string] path:map[description:The file path to append to type:string]] required:[path content] type:object]
+  [1] Type: function, Name: cron
+      Description: Schedule reminders, tasks, or system commands. IMPORTANT: When user asks to be reminded or scheduled, you MUST call this tool. Use 'at_seconds' for one-time reminders (e.g., 'remind me in 10 minutes' → at_seconds=600). Use 'every_seconds' ONLY for recurring tasks (e.g., 'every 2 hours' → every_seconds=7200). Use 'cron_expr' for complex recurring schedules. Use 'command' only for real shell commands such as `df -h` or `dir`; do not put PicoClaw tool names or MCP tool names into `command`. If the scheduled task should call agent tools or MCP tools later, leave `command` empty, keep `deliver=false`, and describe the task in natural language with `message`. For scheduled reports, device polling, monitoring, querying, or summarization, never use `deliver=true`: that would send the task prompt itself to the user instead of executing it.
+      Parameters: map[properties:map[action:map[description:Action to perform. Use 'add' when user wants to schedule a reminder or task. enum:[add list remove enable disable] type:string] at_seconds:map[description:...
+  [2] Type: function, Name: edit_file
+      Description: Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file.
+      Parameters: map[properties:map[new_text:map[description:The text to replace with type:string] old_text:map[description:The exact text to find and replace type:string] path:map[description:The file path to edit...
+  [3] Type: function, Name: exec
+      Description: Execute a shell command and return its output. Use with caution.
+      Parameters: map[properties:map[command:map[description:The shell command to execute type:string] working_dir:map[description:Optional working directory for the command type:string]] required:[command] type:obj...
+  [4] Type: function, Name: find_skills
+      Description: Search for installable skills from skill registries. Returns skill slugs, descriptions, versions, and relevance scores. Use this to discover skills before installing them with install_skill.
+      Parameters: map[properties:map[limit:map[description:Maximum number of results to return (1-20, default 5) maximum:20 minimum:1 type:integer] query:map[description:Search query describing the desired skill cap...
+  [5] Type: function, Name: install_skill
+      Description: Install a skill from a registry by slug. Downloads and extracts the skill into the workspace. Use find_skills first to discover available skills.
+      Parameters: map[properties:map[force:map[description:Force reinstall if skill already exists (default false) type:boolean] registry:map[description:Registry to install from (required, e.g., 'clawhub') type:str...
+  [6] Type: function, Name: list_dir
+      Description: List files and directories in a path
+      Parameters: map[properties:map[path:map[description:Path to list type:string]] required:[path] type:object]
+  [7] Type: function, Name: message
+      Description: Send a plain message to the user on a chat channel. Use this when you want to communicate something. If you are sending to the current conversation, you may omit `chat_id` and `channel`. If you are sending to a different user or group, you must provide the exact target `chat_id` explicitly; do not silently reuse the current chat. If the user names another person or group and the exact `chat_id` may be stored in memory, recall/search memory first and then call this tool with that exact ID; if the mapping is still unknown, ask the user instead of guessing. For `wecom_official`, the normal in-context path can automatically switch from reply-stream editing to the official callback `response_url` when the 6-minute stream edit window has expired, so keep the current reply context unless you truly want a separate proactive message. Use `separate_message=true` only when you intentionally want an independent proactive ordinary message; that path sends an ordinary markdown message, not a template card, and does not reuse the current callback response_url. If the original thinking placeholder or reply stream is already stale, do not try to edit it manually; just send the normal message in the current reply context and let the channel deliver a new follow-up message. For enterprise WeCom template card messages or template-card updates, use the dedicated `wecom_card` tool instead of hand-writing raw `template_card` JSON here.
+      Parameters: map[properties:map[channel:map[description:Optional: target channel (telegram, whatsapp, etc.) type:string] chat_id:map[description:Optional only when sending back to the current conversation. If t...
+  [8] Type: function, Name: read_file
+      Description: Read the contents of a file. Supports pagination via `offset` and `length`.
+      Parameters: map[properties:map[length:map[default:65536 description:Maximum number of bytes to read. type:integer] offset:map[default:0 description:Byte offset to start reading from. type:integer] path:map[des...
+  [9] Type: function, Name: send_file
+      Description: Send a local file (image, document, etc.) to the user on the current chat channel.
+      Parameters: map[properties:map[filename:map[description:Optional display filename. Defaults to the basename of path. type:string] path:map[description:Path to the local file. Relative paths are resolved from w...
+  [10] Type: function, Name: spawn
+      Description: Spawn a subagent to handle a task in the background. Use this for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done.
+      Parameters: map[properties:map[agent_id:map[description:Optional target agent ID to delegate the task to type:string] label:map[description:Optional short label for the task (for display) type:string] task:map...
+  [11] Type: function, Name: web_fetch
+      Description: Fetch a URL and extract readable content (HTML to text). Use this to get weather info, news, articles, or any web content.
+      Parameters: map[properties:map[maxChars:map[description:Maximum characters to extract minimum:100 type:integer] url:map[description:URL to fetch type:string]] required:[url] type:object]
+  [12] Type: function, Name: web_search
+      Description: Search the web for current information. Returns titles, URLs, and snippets from search results.
+      Parameters: map[properties:map[count:map[description:Number of results (1-10) maximum:10 minimum:1 type:integer] query:map[description:Search query type:string]] required:[query] type:object]
+  [13] Type: function, Name: wecom_card
+      Description: Generate and optionally send a native enterprise WeCom template card on `wecom_official`. Always use this instead of hand-writing raw `template_card` JSON. Supports the official `text_notice`, `news_notice`, `button_interaction`, `vote_interaction`, and `multiple_interaction` card types, validates card-type-specific rules such as `card_action`, `task_id`, list sizes, and required sections, and silently ignores empty optional objects or arrays. If the current callback is a `template_card_event`, use this tool only inside the official 5-second card update window; after that window expires, do not try to repair the old card and switch to a plain `message` follow-up in the same callback context instead. If the original `wecom_official` thinking placeholder or reply stream is already older than the official 6-minute stream edit window, do not use this tool to modify that old placeholder; send a normal `message` in the current reply context so the channel can deliver a fresh follow-up message instead. Decision policy: first infer user intent, then choose the card type. If the user explicitly wants an image card, picture card, image presentation card, company introduction card with image, or provides an image URL to be shown in the card, prefer `news_notice`; do not downgrade that request to `button_interaction` just to avoid jump requirements. If the user did not explicitly request a URL jump, website link, mini-program jump, navigation target, or click-to-open behavior, do not use `card_action.type=1` or `card_action.type=2`. In that no-jump case, do not choose `text_notice` or `news_notice`; prefer a non-jump interaction card, usually `button_interaction` with `card_action.type=0`. Exception: if the user explicitly provides a URL and also requests an image or presentation card, you may reuse that same user-provided URL as `card_action.url` for `news_notice`; do not invent a different URL. Never invent a URL, appid, or pagepath just to satisfy a required field. For vague requests like 'send a card' or 'test a card', default to the safest non-jump interaction card. Omit optional fields that are not actually needed, and do not send an extra plain message after a successful card unless the user explicitly asked for it. Delivery is still subject to official per-chat message limits.
+      Parameters: map[properties:map[action_menu:map[properties:map[action_list:map[description:Optional list of 1-3 menu actions. When present, `task_id` is required. items:map[properties:map[key:map[description:Me...
+  [14] Type: function, Name: write_file
+      Description: Write content to a file
+      Parameters: map[properties:map[content:map[description:Content to write to the file type:string] path:map[description:Path to the file to write type:string]] required:[path content] type:object]
+]
+[90m13:17:15[0m DBG [1magent  loop.go:1545 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m LLM response [36magent_id=[0mmain [36mchannel=[0mclaweb [36mcontent_chars=[0m12 [36miteration=[0m1 [36mreasoning=[0m [36mtarget_channel=[0m [36mtool_calls=[0m0
+[90m13:17:15[0m [32mINF[0m [1magent  loop.go:1561 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m [1mLLM response without tool calls (direct answer)[0m [36magent_id=[0mmain [36mcontent_chars=[0m12 [36miteration=[0m1
+[90m13:17:15[0m [32mINF[0m [1magent  loop.go:1292 (agent.(*AgentLoop).runAgentLoop)[0m[36m >[0m [1mResponse: HEARTBEAT_OK[0m [36magent_id=[0mmain [36mfinal_length=[0m12 [36miterations=[0m1 [36msession_key=[0mheartbeat
+[90m13:17:15[0m [32mINF[0m [1mclaweb claweb.go:439 (claweb.(*ClawebChannel).handleHelloFrame)[0m[36m >[0m [1mWebSocket client authenticated[0m [36mclient_id=[0mguest-a [36mconn_id=[0mb7a83064-90d2-485a-8758-ef4b7c46d3d3 [36mroom_id=[0m [36muser_id=[0muser-guest-a
+[90m13:17:15[0m DBG [1mclaweb claweb.go:525 (claweb.(*ClawebChannel).handleClientMessage)[0m[36m >[0m Received message [36mchat_id=[0mclaweb:client:guest-a:user:user-guest-a [36mconn_id=[0mb7a83064-90d2-485a-8758-ef4b7c46d3d3 [36mmedia_count=[0m0 [36mmessage_id=[0mturn-1773983835913 [36mpreview=[0m"What phrase should you answer with after Muninn recovers? Reply with only the..."
+[90m13:17:15[0m [32mINF[0m [1magent  loop.go:803 (agent.(*AgentLoop).processMessageDetailed)[0m[36m >[0m [1mProcessing message from claweb:claweb:user-guest-a: What phrase should you answer with after Muninn recovers? Reply with only the...[0m [36mchannel=[0mclaweb [36mchat_id=[0mclaweb:client:guest-a:user:user-guest-a [36msender_id=[0mclaweb:user-guest-a [36msession_key=[0m
+[90m13:17:15[0m [32mINF[0m [1magent  loop.go:870 (agent.(*AgentLoop).processMessageDetailed)[0m[36m >[0m [1mRouted message[0m [36magent_id=[0mmain [36mmatched_by=[0mdefault [36mroute_agent=[0mmain [36mroute_channel=[0mclaweb [36mscope_key=[0magent:main:claweb:direct:user-guest-a [36msession_key=[0magent:main:claweb:direct:user-guest-a
+[90m13:17:15[0m DBG [1magent  muninn_proxy_log.go:122 (agent.LogMuninnProxyDebug)[0m[36m >[0m muninn_auto_recall_start [36mchannel=[0mclaweb [36mdry_run=[0mfalse [36mevent=[0mmuninn_auto_recall_start [36mmax_items=[0m3 [36moperation=[0mrecall [36mquery_preview=[0m"User request: What phrase should you answer with after Muninn recovers? Reply with only the phra…" [36mround_id=[0mround-1773983835929703800-3 [36msession_key=[0magent:main:claweb:direct:user-guest-a [36mtimeout_ms=[0m30000 [36mvault=[0mdefault
+[90m13:17:15[0m [32mINF[0m [1magent  muninn_proxy_log.go:132 (agent.LogMuninnProxyInfo)[0m[36m >[0m [1mmuninn_auto_recall_hit[0m [36mcandidate_count=[0m3 [36mchannel=[0mclaweb [36mdry_run=[0mfalse [36mduration_ms=[0m43 [36mevent=[0mmuninn_auto_recall_hit [36minjected_count=[0m3 [36mitem_count=[0m3 [36mmax_items=[0m3 [36moperation=[0mrecall [36mprompt_persist=[0mfalse [36mprompt_title=[0m"Relevant Memory (Muninn Auto-Recall)" [36mquery_preview=[0m"User request: What phrase should you answer with after Muninn recovers? Reply with only the phra…" [36mreason=[0m"activate returned relevant memories" [36mround_id=[0mround-1773983835929703800-3 [36msession_key=[0magent:main:claweb:direct:user-guest-a [36mstatus=[0mhit [36mtimeout_ms=[0m30000 [36mvault=[0mdefault
+[90m13:17:15[0m DBG [1magent  context.go:444 (agent.(*ContextBuilder).BuildMessages)[0m[36m >[0m System prompt built [36mcached=[0mtrue [36mdynamic_chars=[0m239 [36mhas_summary=[0mtrue [36mstatic_chars=[0m6127 [36mtotal_chars=[0m7378
+[90m13:17:15[0m DBG [1magent  context.go:455 (agent.(*ContextBuilder).BuildMessages)[0m[36m >[0m System prompt preview [36mpreview=[0m
+# picoclaw 🦞 (dev)
+
+You are picoclaw, a helpful AI assistant.
+
+## Workspace
+Your workspace is at: C:\Users\杨旭\.picoclaw\workspace
+- Skills: C:\Users\杨旭\.picoclaw\workspace/skills/{skill-name}/SKILL.md
+
+## Important Rules
+
+1. **ALWAYS use tools** - When you need to perform an action, you MUST call the appropriate tool.
+
+2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
+
+3. **Muninn Memory via MCP** - In Muninn mode, memory and recall come from the official M...
+[90m13:17:16[0m DBG [1magent  loop.go:1378 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m LLM iteration [36magent_id=[0mmain [36miteration=[0m1 [36mmax=[0m20
+[90m13:17:16[0m DBG [1magent  loop.go:1389 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m LLM request [36magent_id=[0mmain [36miteration=[0m1 [36mmax_tokens=[0m8192 [36mmessages_count=[0m9 [36mmodel=[0mglm-5 [36msystem_prompt_len=[0m7378 [36mtemperature=[0m0.7 [36mtools_count=[0m15
+[90m13:17:16[0m DBG [1magent  loop.go:1402 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m Full LLM request [36miteration=[0m1 [36mmessages_json=[0m
+[
+  [0] Role: system
+  Content: # picoclaw 🦞 (dev)
+
+You are picoclaw, a helpful AI assistant.
+
+## Workspace
+Your workspace is at: C:\Users\杨旭\.picoclaw\workspace
+- Skills: C:\Users\杨旭\.picoclaw\workspace/skills/{skill-name}/SKILL...
+
+  [1] Role: user
+  Content: What is my preference again? Answer in one short sentence.
+
+  [2] Role: assistant
+  Content: You prefer dark mode for every project we work on.
+
+  [3] Role: user
+  Content: reply with exactly pong
+
+  [4] Role: assistant
+  Content: pong
+
+  [5] Role: user
+  Content: Please answer normally even if memory is unavailable right now. Reply with exactly: claweb survived disruption.
+
+  [6] Role: assistant
+  ToolCalls:
+    - ID: call_6abf0df086384b00895d4f790f015909, Type: function, Name: 
+      Arguments: {"content":"claweb survived disruption."}
+
+  [7] Role: tool
+  Content: Message sent to claweb:claweb:client:guest-a:user:user-guest-a
+  ToolCallID: call_6abf0df086384b00895d4f790f015909
+
+  [8] Role: user
+  Content: What phrase should you answer with after Muninn recovers? Reply with only the phrase.
+
+] [36mtools_json=[0m
+[
+  [0] Type: function, Name: append_file
+      Description: Append content to the end of a file
+      Parameters: map[properties:map[content:map[description:The content to append type:string] path:map[description:The file path to append to type:string]] required:[path content] type:object]
+  [1] Type: function, Name: cron
+      Description: Schedule reminders, tasks, or system commands. IMPORTANT: When user asks to be reminded or scheduled, you MUST call this tool. Use 'at_seconds' for one-time reminders (e.g., 'remind me in 10 minutes' → at_seconds=600). Use 'every_seconds' ONLY for recurring tasks (e.g., 'every 2 hours' → every_seconds=7200). Use 'cron_expr' for complex recurring schedules. Use 'command' only for real shell commands such as `df -h` or `dir`; do not put PicoClaw tool names or MCP tool names into `command`. If the scheduled task should call agent tools or MCP tools later, leave `command` empty, keep `deliver=false`, and describe the task in natural language with `message`. For scheduled reports, device polling, monitoring, querying, or summarization, never use `deliver=true`: that would send the task prompt itself to the user instead of executing it.
+      Parameters: map[properties:map[action:map[description:Action to perform. Use 'add' when user wants to schedule a reminder or task. enum:[add list remove enable disable] type:string] at_seconds:map[description:...
+  [2] Type: function, Name: edit_file
+      Description: Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file.
+      Parameters: map[properties:map[new_text:map[description:The text to replace with type:string] old_text:map[description:The exact text to find and replace type:string] path:map[description:The file path to edit...
+  [3] Type: function, Name: exec
+      Description: Execute a shell command and return its output. Use with caution.
+      Parameters: map[properties:map[command:map[description:The shell command to execute type:string] working_dir:map[description:Optional working directory for the command type:string]] required:[command] type:obj...
+  [4] Type: function, Name: find_skills
+      Description: Search for installable skills from skill registries. Returns skill slugs, descriptions, versions, and relevance scores. Use this to discover skills before installing them with install_skill.
+      Parameters: map[properties:map[limit:map[description:Maximum number of results to return (1-20, default 5) maximum:20 minimum:1 type:integer] query:map[description:Search query describing the desired skill cap...
+  [5] Type: function, Name: install_skill
+      Description: Install a skill from a registry by slug. Downloads and extracts the skill into the workspace. Use find_skills first to discover available skills.
+      Parameters: map[properties:map[force:map[description:Force reinstall if skill already exists (default false) type:boolean] registry:map[description:Registry to install from (required, e.g., 'clawhub') type:str...
+  [6] Type: function, Name: list_dir
+      Description: List files and directories in a path
+      Parameters: map[properties:map[path:map[description:Path to list type:string]] required:[path] type:object]
+  [7] Type: function, Name: message
+      Description: Send a plain message to the user on a chat channel. Use this when you want to communicate something. If you are sending to the current conversation, you may omit `chat_id` and `channel`. If you are sending to a different user or group, you must provide the exact target `chat_id` explicitly; do not silently reuse the current chat. If the user names another person or group and the exact `chat_id` may be stored in memory, recall/search memory first and then call this tool with that exact ID; if the mapping is still unknown, ask the user instead of guessing. For `wecom_official`, the normal in-context path can automatically switch from reply-stream editing to the official callback `response_url` when the 6-minute stream edit window has expired, so keep the current reply context unless you truly want a separate proactive message. Use `separate_message=true` only when you intentionally want an independent proactive ordinary message; that path sends an ordinary markdown message, not a template card, and does not reuse the current callback response_url. If the original thinking placeholder or reply stream is already stale, do not try to edit it manually; just send the normal message in the current reply context and let the channel deliver a new follow-up message. For enterprise WeCom template card messages or template-card updates, use the dedicated `wecom_card` tool instead of hand-writing raw `template_card` JSON here.
+      Parameters: map[properties:map[channel:map[description:Optional: target channel (telegram, whatsapp, etc.) type:string] chat_id:map[description:Optional only when sending back to the current conversation. If t...
+  [8] Type: function, Name: read_file
+      Description: Read the contents of a file. Supports pagination via `offset` and `length`.
+      Parameters: map[properties:map[length:map[default:65536 description:Maximum number of bytes to read. type:integer] offset:map[default:0 description:Byte offset to start reading from. type:integer] path:map[des...
+  [9] Type: function, Name: send_file
+      Description: Send a local file (image, document, etc.) to the user on the current chat channel.
+      Parameters: map[properties:map[filename:map[description:Optional display filename. Defaults to the basename of path. type:string] path:map[description:Path to the local file. Relative paths are resolved from w...
+  [10] Type: function, Name: spawn
+      Description: Spawn a subagent to handle a task in the background. Use this for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done.
+      Parameters: map[properties:map[agent_id:map[description:Optional target agent ID to delegate the task to type:string] label:map[description:Optional short label for the task (for display) type:string] task:map...
+  [11] Type: function, Name: web_fetch
+      Description: Fetch a URL and extract readable content (HTML to text). Use this to get weather info, news, articles, or any web content.
+      Parameters: map[properties:map[maxChars:map[description:Maximum characters to extract minimum:100 type:integer] url:map[description:URL to fetch type:string]] required:[url] type:object]
+  [12] Type: function, Name: web_search
+      Description: Search the web for current information. Returns titles, URLs, and snippets from search results.
+      Parameters: map[properties:map[count:map[description:Number of results (1-10) maximum:10 minimum:1 type:integer] query:map[description:Search query type:string]] required:[query] type:object]
+  [13] Type: function, Name: wecom_card
+      Description: Generate and optionally send a native enterprise WeCom template card on `wecom_official`. Always use this instead of hand-writing raw `template_card` JSON. Supports the official `text_notice`, `news_notice`, `button_interaction`, `vote_interaction`, and `multiple_interaction` card types, validates card-type-specific rules such as `card_action`, `task_id`, list sizes, and required sections, and silently ignores empty optional objects or arrays. If the current callback is a `template_card_event`, use this tool only inside the official 5-second card update window; after that window expires, do not try to repair the old card and switch to a plain `message` follow-up in the same callback context instead. If the original `wecom_official` thinking placeholder or reply stream is already older than the official 6-minute stream edit window, do not use this tool to modify that old placeholder; send a normal `message` in the current reply context so the channel can deliver a fresh follow-up message instead. Decision policy: first infer user intent, then choose the card type. If the user explicitly wants an image card, picture card, image presentation card, company introduction card with image, or provides an image URL to be shown in the card, prefer `news_notice`; do not downgrade that request to `button_interaction` just to avoid jump requirements. If the user did not explicitly request a URL jump, website link, mini-program jump, navigation target, or click-to-open behavior, do not use `card_action.type=1` or `card_action.type=2`. In that no-jump case, do not choose `text_notice` or `news_notice`; prefer a non-jump interaction card, usually `button_interaction` with `card_action.type=0`. Exception: if the user explicitly provides a URL and also requests an image or presentation card, you may reuse that same user-provided URL as `card_action.url` for `news_notice`; do not invent a different URL. Never invent a URL, appid, or pagepath just to satisfy a required field. For vague requests like 'send a card' or 'test a card', default to the safest non-jump interaction card. Omit optional fields that are not actually needed, and do not send an extra plain message after a successful card unless the user explicitly asked for it. Delivery is still subject to official per-chat message limits.
+      Parameters: map[properties:map[action_menu:map[properties:map[action_list:map[description:Optional list of 1-3 menu actions. When present, `task_id` is required. items:map[properties:map[key:map[description:Me...
+  [14] Type: function, Name: write_file
+      Description: Write content to a file
+      Parameters: map[properties:map[content:map[description:Content to write to the file type:string] path:map[description:Path to the file to write type:string]] required:[path content] type:object]
+]
+[90m13:17:20[0m DBG [1magent  loop.go:1545 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m LLM response [36magent_id=[0mmain [36mchannel=[0mclaweb [36mcontent_chars=[0m24 [36miteration=[0m1 [36mreasoning=[0m [36mtarget_channel=[0m [36mtool_calls=[0m0
+[90m13:17:20[0m [32mINF[0m [1magent  loop.go:1561 (agent.(*AgentLoop).runLLMIteration)[0m[36m >[0m [1mLLM response without tool calls (direct answer)[0m [36magent_id=[0mmain [36mcontent_chars=[0m24 [36miteration=[0m1
+[90m13:17:20[0m [32mINF[0m [1magent  loop.go:1292 (agent.(*AgentLoop).runAgentLoop)[0m[36m >[0m [1mResponse: recovery-signal-20260320[0m [36magent_id=[0mmain [36mfinal_length=[0m24 [36miterations=[0m1 [36msession_key=[0magent:main:claweb:direct:user-guest-a
+[90m13:17:20[0m [32mINF[0m [1magent  loop.go:408 (agent.(*AgentLoop).Run.func1)[0m[36m >[0m [1mPublished outbound response[0m [36mchannel=[0mclaweb [36mchat_id=[0mclaweb:client:guest-a:user:user-guest-a [36mcontent_len=[0m24
