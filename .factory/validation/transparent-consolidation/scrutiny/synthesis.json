@@ -1,0 +1,50 @@
+{
+  "milestone": "transparent-consolidation",
+  "round": 2,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "go test -p 3 ./pkg/agent ./pkg/config ./pkg/mcp ./pkg/muninndb ./pkg/tools ./pkg/channels/claweb -skip \"TestShellTool_(DevNullAllowed|FileURISandboxing|URLBypassPrevented)\" -count=1",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "go test -run '^$' ./...",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "node ./.factory/scripts/lint-changed.mjs",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Clarify in `go-memory-worker` when rerun/fix-validation sessions may skip an explicit red-test-first transcript, versus when behavioral changes still require recording a failing test before implementation.",
+      "evidence": "The review for `muninn-consolidation-why-and-cache-refresh` found the worker transcript only showed reads, green test runs, and handoff despite `go-memory-worker` step 4 describing a tests-first flow.",
+      "isSystemic": false
+    },
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Update `.factory/services.yaml` right now to replace the documented `CLAWEB_UPSTREAM_TOKEN_FILE` frontdoor startup with inline `CLAWEB_UPSTREAM_TOKEN`.",
+      "reason": "rejected because the accepted rerun evidence showed a Windows-specific validation harness workaround, but the existing service manifest remains a functioning baseline and changing shared startup guidance is a normative/system-wide decision better left to the orchestrator."
+    },
+    {
+      "observation": "Update `.factory/library/environment.md` to replace the documented Muninn MCP `session not found` incompatibility note with `Unauthorized` and the newer recovery-proof path.",
+      "reason": "rejected because the observation appears environment-specific and supersedes, rather than cleanly adds to, existing shared knowledge; it should be reviewed by the orchestrator before changing library guidance."
+    }
+  ],
+  "previousRound": "D:\\tmp\\claw\\picoclaw\\.factory\\validation\\transparent-consolidation\\scrutiny\\synthesis.json"
+}
