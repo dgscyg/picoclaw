@@ -319,6 +319,8 @@ picoclaw onboard
 
 > **Note**: See `config.example.json` for a complete configuration template.
 
+> **MuninnDB split auth**: If you use `memory.provider: "muninndb"`, configure `memory.muninndb.rest_api_key` for the REST API and `memory.muninndb.mcp_api_key` for the MCP server. `mcp_endpoint` should point to the MCP URL (for example `http://127.0.0.1:8750/mcp`), while `rest_endpoint` can point to the REST base URL (for example `http://127.0.0.1:8475`).
+
 **4. Chat**
 
 ```bash

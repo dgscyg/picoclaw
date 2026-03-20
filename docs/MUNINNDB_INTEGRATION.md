@@ -67,11 +67,12 @@ type MemoryProvider interface {
   "memory": {
     "provider": "muninndb",
     "muninndb": {
-      "endpoint": "http://localhost:8475",
+      "mcp_endpoint": "http://localhost:8750/mcp",
+      "rest_endpoint": "http://localhost:8475",
       "vault": "picoclaw",
-      "api_key": "${MUNINNDB_API_KEY}",
-      "timeout": "30s",
-      "fallback_to_file": true
+      "rest_api_key": "${MUNINNDB_REST_API_KEY}",
+      "mcp_api_key": "${MUNINNDB_MCP_API_KEY}",
+      "timeout": "30s"
     }
   }
 }

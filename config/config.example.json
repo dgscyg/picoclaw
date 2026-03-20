@@ -17,9 +17,11 @@
       "workspace": "~/.picoclaw/workspace"
     },
     "muninndb": {
-      "mcp_endpoint": "http://localhost:8475",
+      "mcp_endpoint": "http://localhost:8750/mcp",
+      "rest_endpoint": "http://localhost:8475",
       "vault": "picoclaw",
-      "api_key": "${MUNINNDB_API_KEY}",
+      "rest_api_key": "${MUNINNDB_REST_API_KEY}",
+      "mcp_api_key": "${MUNINNDB_MCP_API_KEY}",
       "timeout": "30s"
     }
   },
@@ -125,7 +127,7 @@
       "listen_host": "127.0.0.1",
       "listen_port": 18999,
       "auth_token": "",
-      "auth_token_file": "",
+      "auth_token_file": "C:/path/to/claweb.token",
       "allow_from": [],
       "reasoning_channel_id": ""
     },
