@@ -1,0 +1,77 @@
+{
+  "milestone": "transparent-recall",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "go test -p 3 ./pkg/agent ./pkg/config ./pkg/mcp ./pkg/muninndb ./pkg/tools ./pkg/channels/claweb -skip \"TestShellTool_(DevNullAllowed|FileURISandboxing|URLBypassPrevented)\" -count=1",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "go test -p 3 ./pkg/agent ./pkg/config ./pkg/mcp ./pkg/muninndb ./pkg/tools ./pkg/channels/claweb -skip \"TestShellTool_(DevNullAllowed|FileURISandboxing|URLBypassPrevented)\" -count=1",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "node ./.factory/scripts/lint-changed.mjs",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 1,
+    "failed": 2,
+    "failedFeatures": [
+      "muninn-proxy-foundation-and-test-hooks",
+      "muninn-recall-resilience-and-mcp-interop"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "muninn-proxy-foundation-and-test-hooks",
+      "severity": "blocking",
+      "description": "pkg/agent/muninn_proxy.go still enforces the obsolete dedicated validation vault instead of the mission-approved `default` vault, and pkg/agent/muninn_proxy_test.go encodes that outdated rule in regression coverage."
+    },
+    {
+      "featureId": "muninn-recall-resilience-and-mcp-interop",
+      "severity": "blocking",
+      "description": "pkg/config/memory.go returns early when a preexisting `tools.mcp.servers.muninn` entry exists, so manual `mcp_muninn_*` calls can still bypass normalization and point at the wrong endpoint instead of the live MCP listener on 8750."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Documented that the live Muninn MCP listener on 127.0.0.1:8750 can still reject PicoClaw initialization with `session not found`, so port reachability alone is not valid coexistence proof.",
+      "sourceFeature": "muninn-recall-resilience-and-mcp-interop"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Clarify in the `go-memory-worker` procedure that endpoint reachability checks are not sufficient for Muninn coexistence features; workers must capture evidence of a turn where auto recall and a manual `mcp_muninn_*` call both succeed in the same run.",
+      "evidence": "The `muninn-recall-resilience-and-mcp-interop` review found the handoff claimed the procedure was followed even though verification only covered tests and port/health checks, not the required coexistence flow.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The `go-memory-worker` skill should be updated to prefer a dedicated validation vault instead of `default`.",
+      "reason": "rejected because mission guidance and AGENTS explicitly require the approved validation vault `default`; the reviewed worker deviated from the documented requirement rather than exposing a guidance bug"
+    },
+    {
+      "observation": "The committed example config should be updated to document the local 8475/8750 split immediately.",
+      "reason": "rejected because documentation/example-config changes were not requested here and the knowledge is already captured in `.factory/library/environment.md`; the synthesis only needs to record the mismatch for orchestrator awareness"
+    },
+    {
+      "observation": "Change branch-wide lint guidance back to raw `golangci-lint run`.",
+      "reason": "rejected because `.factory/services.yaml` and `.factory/library/environment.md` already document the approved change-scoped lint wrapper for this branch state"
+    },
+    {
+      "observation": "Apply a services.yaml update for Windows-safe gateway/frontdoor commands now.",
+      "reason": "rejected as ambiguous because the concrete safe replacement command shape was not established in the reviewer evidence; it should be proposed with a tested command form before direct application"
+    }
+  ],
+  "previousRound": null
+}

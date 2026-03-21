@@ -237,6 +237,29 @@ func (c *BaseChannel) HandleMessage(
 	metadata map[string]string,
 	senderOpts ...bus.SenderInfo,
 ) {
+	c.HandleMessageWithSessionKey(
+		ctx,
+		peer,
+		messageID,
+		senderID,
+		chatID,
+		content,
+		media,
+		metadata,
+		"",
+		senderOpts...,
+	)
+}
+
+func (c *BaseChannel) HandleMessageWithSessionKey(
+	ctx context.Context,
+	peer bus.Peer,
+	messageID, senderID, chatID, content string,
+	media []string,
+	metadata map[string]string,
+	sessionKey string,
+	senderOpts ...bus.SenderInfo,
+) {
 	// Use SenderInfo-based allow check when available, else fall back to string
 	var sender bus.SenderInfo
 	if len(senderOpts) > 0 {
@@ -270,6 +293,7 @@ func (c *BaseChannel) HandleMessage(
 		Peer:       peer,
 		MessageID:  messageID,
 		MediaScope: scope,
+		SessionKey: strings.TrimSpace(sessionKey),
 		Metadata:   metadata,
 	}
 

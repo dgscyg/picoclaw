@@ -144,7 +144,7 @@ func TestToolRegistry_ExecuteWithContext_InjectsToolContext(t *testing.T) {
 	}
 	r.Register(ct)
 
-	r.ExecuteWithContext(context.Background(), "ctx_tool", nil, "telegram", "chat-42", nil)
+	r.ExecuteWithContext(context.Background(), "ctx_tool", nil, "telegram", "chat-42", "reply-7", nil)
 
 	if ct.lastCtx == nil {
 		t.Fatal("expected Execute to be called")
@@ -155,6 +155,9 @@ func TestToolRegistry_ExecuteWithContext_InjectsToolContext(t *testing.T) {
 	if got := ToolChatID(ct.lastCtx); got != "chat-42" {
 		t.Errorf("expected chatID 'chat-42', got %q", got)
 	}
+	if got := ToolReplyTo(ct.lastCtx); got != "reply-7" {
+		t.Errorf("expected replyTo 'reply-7', got %q", got)
+	}
 }
 
 func TestToolRegistry_ExecuteWithContext_EmptyContext(t *testing.T) {
@@ -164,7 +167,7 @@ func TestToolRegistry_ExecuteWithContext_EmptyContext(t *testing.T) {
 	}
 	r.Register(ct)
 
-	r.ExecuteWithContext(context.Background(), "ctx_tool", nil, "", "", nil)
+	r.ExecuteWithContext(context.Background(), "ctx_tool", nil, "", "", "", nil)
 
 	if ct.lastCtx == nil {
 		t.Fatal("expected Execute to be called")
@@ -175,6 +178,9 @@ func TestToolRegistry_ExecuteWithContext_EmptyContext(t *testing.T) {
 	}
 	if got := ToolChatID(ct.lastCtx); got != "" {
 		t.Errorf("expected empty chatID, got %q", got)
+	}
+	if got := ToolReplyTo(ct.lastCtx); got != "" {
+		t.Errorf("expected empty replyTo, got %q", got)
 	}
 }
 
@@ -189,7 +195,7 @@ func TestToolRegistry_ExecuteWithContext_AsyncCallback(t *testing.T) {
 	called := false
 	cb := func(_ context.Context, _ *ToolResult) { called = true }
 
-	result := r.ExecuteWithContext(context.Background(), "async_tool", nil, "", "", cb)
+	result := r.ExecuteWithContext(context.Background(), "async_tool", nil, "", "", "", cb)
 	if at.lastCB == nil {
 		t.Error("expected ExecuteAsync to have received a callback")
 	}
@@ -582,6 +588,7 @@ func TestToolRegistry_ExecuteWithContext_PanicRecovery(t *testing.T) {
 		map[string]any{"key": "value"},
 		"telegram",
 		"chat-123",
+		"",
 		nil,
 	)
 

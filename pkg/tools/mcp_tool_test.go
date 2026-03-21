@@ -370,6 +370,106 @@ func TestMCPTool_Execute_MultipleContent(t *testing.T) {
 	}
 }
 
+func TestMCPTool_Execute_UsesStructuredContentWhenTextIsEmpty(t *testing.T) {
+	manager := &MockMCPManager{
+		callToolFunc: func(ctx context.Context, serverName, toolName string, arguments map[string]any) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{
+				StructuredContent: map[string]any{
+					"00000000": "total energy",
+					"02800007": "temperature",
+				},
+				IsError: false,
+			}, nil
+		},
+	}
+
+	tool := &mcp.Tool{Name: "get_di_list"}
+	mcpTool := NewMCPTool(manager, "dl645", tool)
+
+	result := mcpTool.Execute(context.Background(), map[string]any{})
+
+	if result == nil {
+		t.Fatal("Result should not be nil")
+	}
+	if result.IsError {
+		t.Fatalf("Expected no error, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, `"00000000": "total energy"`) {
+		t.Fatalf("Expected structured content in result, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, `"02800007": "temperature"`) {
+		t.Fatalf("Expected structured content in result, got: %s", result.ForLLM)
+	}
+}
+
+func TestMCPTool_Execute_AppendsStructuredContentWhenBothExist(t *testing.T) {
+	manager := &MockMCPManager{
+		callToolFunc: func(ctx context.Context, serverName, toolName string, arguments map[string]any) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: "Found device list"},
+				},
+				StructuredContent: map[string]any{
+					"devices": []map[string]any{
+						{"did": "6872176FF500", "name": "会议室空调"},
+					},
+				},
+				IsError: false,
+			}, nil
+		},
+	}
+
+	tool := &mcp.Tool{Name: "get_device_list"}
+	mcpTool := NewMCPTool(manager, "dl645", tool)
+
+	result := mcpTool.Execute(context.Background(), map[string]any{})
+
+	if result == nil {
+		t.Fatal("Result should not be nil")
+	}
+	if result.IsError {
+		t.Fatalf("Expected no error, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "Found device list") {
+		t.Fatalf("Expected text content in result, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, `"devices": [`) {
+		t.Fatalf("Expected structured content in result, got: %s", result.ForLLM)
+	}
+	if strings.Count(result.ForLLM, "Found device list") != 1 {
+		t.Fatalf("Expected text content to appear once, got: %s", result.ForLLM)
+	}
+}
+
+func TestMCPTool_Execute_UsesStructuredContentForErrors(t *testing.T) {
+	manager := &MockMCPManager{
+		callToolFunc: func(ctx context.Context, serverName, toolName string, arguments map[string]any) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{
+				StructuredContent: map[string]any{
+					"error": "device offline",
+					"did":   "6872176FF500",
+				},
+				IsError: true,
+			}, nil
+		},
+	}
+
+	tool := &mcp.Tool{Name: "get_device_current_data"}
+	mcpTool := NewMCPTool(manager, "dl645", tool)
+
+	result := mcpTool.Execute(context.Background(), map[string]any{})
+
+	if result == nil {
+		t.Fatal("Result should not be nil")
+	}
+	if !result.IsError {
+		t.Fatal("Expected IsError to be true")
+	}
+	if !strings.Contains(result.ForLLM, `"error": "device offline"`) {
+		t.Fatalf("Expected structured error content, got: %s", result.ForLLM)
+	}
+}
+
 // TestExtractContentText_TextContent tests text content extraction
 func TestExtractContentText_TextContent(t *testing.T) {
 	content := []mcp.Content{
@@ -488,5 +588,22 @@ func TestMCPTool_Parameters_MapSchema(t *testing.T) {
 
 	if nameParam["type"] != "string" {
 		t.Errorf("Name type should be 'string', got '%v'", nameParam["type"])
+	}
+}
+
+func TestMergeMCPArgs_ForcedOverridesProvided(t *testing.T) {
+	merged := mergeMCPArgs(
+		map[string]any{"threshold": 0.5},
+		map[string]any{"vault": "picoclaw"},
+		map[string]any{"vault": "default", "limit": 10},
+	)
+	if merged["vault"] != "picoclaw" {
+		t.Fatalf("vault = %v, want picoclaw", merged["vault"])
+	}
+	if merged["limit"] != 10 {
+		t.Fatalf("limit = %v, want 10", merged["limit"])
+	}
+	if merged["threshold"] != 0.5 {
+		t.Fatalf("threshold = %v, want 0.5", merged["threshold"])
 	}
 }

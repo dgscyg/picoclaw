@@ -1,0 +1,26 @@
+{
+  "featureId": "muninn-auto-recall-planner-and-injection",
+  "reviewedAt": "2026-03-19T09:00:00Z",
+  "commitId": "22e3e0b336bfa405133f1ef97323a6049322c20a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature correctly performs pre-LLM Muninn auto-recall in Muninn mode, injects a bounded non-persistent `Relevant Memory (Muninn Auto-Recall)` block into dynamic context, and leaves persisted session history clean. The reviewed commit only retargets validation plumbing to the approved `default` vault and is consistent with the already-landed recall implementation and tests.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "services",
+      "observation": "The worker had to bypass the literal Windows gateway and claweb_frontdoor start/stop commands in .factory/services.yaml because Exec-mode interpolation stripped PowerShell $env: and $_ expressions, so the documented commands are not reliably executable as written in this environment.",
+      "evidence": "Feature handoff 2026-03-19T05-19-27-195Z__muninn-auto-recall-planner-and-injection__902a0234-60b7-4fb6-aa80-c7f456d3b608.json records skillFeedback.deviations for steps 1.7 Start Services and 3.1 Environment Cleanup, and recommends an Exec-mode-safe Windows variant."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Mission knowledge still documents the local Muninn MCP listener as unhealthy, but this reviewed feature only depends on REST-based auto-recall and succeeded after switching validation to the approved `default` vault. That split is important shared context for later validators reviewing coexistence assertions.",
+      "evidence": "D:\\tmp\\claw\\picoclaw\\.factory\\library\\muninn-transparent-layer.md says `current PicoClaw MCP negotiation against the live Muninn listener is not yet healthy`, while the worker handoff reports successful live auto-recall via REST on vault `default` and separately notes the MCP listener issue as non-blocking for this feature."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. I reviewed the mission artifacts, worker transcript skeleton, handoff, commit 22e3e0b336bfa405133f1ef97323a6049322c20a, and the relevant agent/context code paths. The implementation satisfies the feature scope for recall-first injection and non-persistent dynamic context, and the main follow-ups are shared-state notes for Windows-safe service commands and the separate MCP-health context."
+}

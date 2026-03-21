@@ -34,6 +34,11 @@ type ToolResult struct {
 	// Media contains media store refs produced by this tool.
 	// When non-empty, the agent will publish these as OutboundMediaMessage.
 	Media []string `json:"media,omitempty"`
+
+	// ConsumesCurrentTurn indicates that the tool has already delivered the
+	// user-facing result for the current conversation, so the agent should not
+	// continue generating an additional assistant reply for this turn.
+	ConsumesCurrentTurn bool `json:"consumes_current_turn,omitempty"`
 }
 
 // NewToolResult creates a basic ToolResult with content for the LLM.

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/utils"
@@ -218,6 +219,7 @@ func formatDiscoveryResponse(registry *ToolRegistry, results []ToolSearchResult,
 type searchDoc struct {
 	Name        string
 	Description string
+	SearchText  string
 }
 
 // bm25CachedEngine wraps a BM25Engine with its corpus snapshot.
@@ -229,7 +231,11 @@ type bm25CachedEngine struct {
 func snapshotToSearchDocs(snap HiddenToolSnapshot) []searchDoc {
 	docs := make([]searchDoc, len(snap.Docs))
 	for i, d := range snap.Docs {
-		docs[i] = searchDoc{Name: d.Name, Description: d.Description}
+		docs[i] = searchDoc{
+			Name:        d.Name,
+			Description: d.Description,
+			SearchText:  buildDiscoverySearchText(d.Name, d.Description),
+		}
 	}
 	return docs
 }
@@ -239,9 +245,46 @@ func buildBM25Engine(docs []searchDoc) *utils.BM25Engine[searchDoc] {
 	return utils.NewBM25Engine(
 		docs,
 		func(doc searchDoc) string {
-			return doc.Name + " " + doc.Description
+			return doc.SearchText
 		},
 	)
+}
+
+func buildDiscoverySearchText(name, description string) string {
+	parts := []string{name, description}
+
+	if expanded := normalizeDiscoveryText(name); expanded != "" && expanded != name {
+		parts = append(parts, expanded)
+	}
+	if expanded := normalizeDiscoveryText(description); expanded != "" && expanded != description {
+		parts = append(parts, expanded)
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func normalizeDiscoveryText(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	lastSpace := false
+	for _, r := range s {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			b.WriteRune(unicode.ToLower(r))
+			lastSpace = false
+		default:
+			if !lastSpace {
+				b.WriteByte(' ')
+				lastSpace = true
+			}
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
 }
 
 // getOrBuildEngine returns a cached BM25 engine, rebuilding it only when

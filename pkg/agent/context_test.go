@@ -188,6 +188,39 @@ func TestSanitizeHistoryForProvider_PlainConversation(t *testing.T) {
 	assertRoles(t, result, "user", "assistant", "user", "assistant")
 }
 
+func TestNormalizeTemplateCardEventHistory_EquivalentInstruction(t *testing.T) {
+	input := `User clicked template card action: 开启空调. Equivalent user instruction: "开启空调". Treat this as a confirmed user request.`
+	got, ok := normalizeTemplateCardEventHistory(input)
+	if !ok {
+		t.Fatal("expected template-card-event history to be recognized")
+	}
+	if want := "User clicked template card action: 开启空调."; got != want {
+		t.Fatalf("normalizeTemplateCardEventHistory() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeTemplateCardEventHistory_LegacyTriggeredMessage(t *testing.T) {
+	input := "Template card event triggered. event_key=turn_on_ac. Do not call `wecom_card` again for this event."
+	got, ok := normalizeTemplateCardEventHistory(input)
+	if !ok {
+		t.Fatal("expected legacy template-card-event history to be recognized")
+	}
+	if want := "User clicked template card action key: turn_on_ac."; got != want {
+		t.Fatalf("normalizeTemplateCardEventHistory() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeTemplateCardEventHistory_StripsCardContext(t *testing.T) {
+	input := "User clicked template card action: 开启空调. Card context: 设备ID=6872176FF500, 会议室空调状态监控."
+	got, ok := normalizeTemplateCardEventHistory(input)
+	if !ok {
+		t.Fatal("expected template-card-event history to be recognized")
+	}
+	if want := "User clicked template card action: 开启空调."; got != want {
+		t.Fatalf("normalizeTemplateCardEventHistory() = %q, want %q", got, want)
+	}
+}
+
 func roles(msgs []providers.Message) []string {
 	r := make([]string, len(msgs))
 	for i, m := range msgs {

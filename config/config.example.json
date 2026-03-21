@@ -15,6 +15,20 @@
       }
     }
   },
+  "memory": {
+    "provider": "file",
+    "file": {
+      "workspace": "~/.picoclaw/workspace"
+    },
+    "muninndb": {
+      "mcp_endpoint": "http://localhost:8750/mcp",
+      "rest_endpoint": "http://localhost:8475",
+      "vault": "picoclaw",
+      "rest_api_key": "${MUNINNDB_REST_API_KEY}",
+      "mcp_api_key": "${MUNINNDB_MCP_API_KEY}",
+      "timeout": "30s"
+    }
+  },
   "model_list": [
     {
       "model_name": "gpt-5.4",
@@ -110,6 +124,16 @@
       "enabled": false,
       "host": "0.0.0.0",
       "port": 18790,
+      "allow_from": [],
+      "reasoning_channel_id": ""
+    },
+    "claweb": {
+      "_comment": "CLAWeb WebSocket bridge - upstream endpoint for claweb frontdoor/browser.",
+      "enabled": false,
+      "listen_host": "127.0.0.1",
+      "listen_port": 18999,
+      "auth_token": "",
+      "auth_token_file": "C:/path/to/claweb.token",
       "allow_from": [],
       "reasoning_channel_id": ""
     },
@@ -214,6 +238,24 @@
       "webhook_path": "/webhook/wecom-aibot",
       "max_steps": 10,
       "welcome_message": "Hello! I'm your AI assistant. How can I help you today?",
+      "reasoning_channel_id": ""
+    },
+    "wecom_official": {
+      "_comment": "WeCom Official (Smart Bot WebSocket) - official long connection for inbound chats and proactive notifications.",
+      "enabled": false,
+      "bot_id": "YOUR_BOT_ID",
+      "secret": "YOUR_BOT_SECRET",
+      "websocket_url": "wss://openws.work.weixin.qq.com",
+      "allow_from": [],
+      "placeholder": {
+        "enabled": true,
+        "text": "Thinking... 💭"
+      },
+      "card": {
+        "enabled": false,
+        "title": "PicoClaw"
+      },
+      "welcome_message": "",
       "reasoning_channel_id": ""
     },
     "pico": {
@@ -516,6 +558,12 @@
       "enabled": true
     },
     "message": {
+      "enabled": true
+    },
+    "memory_recall": {
+      "enabled": true
+    },
+    "memory_store": {
       "enabled": true
     },
     "read_file": {

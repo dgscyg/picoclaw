@@ -1,0 +1,82 @@
+# Channel System Architecture
+
+## 1. Identity
+
+- **What it is:** A registry-based multi-platform messaging abstraction layer with optional capability interfaces.
+- **Purpose:** Decouples platform-specific messaging implementations from the agent core via a Message Bus pattern, supporting 15+ platforms with unified message flow.
+
+## 2. Core Components
+
+- `pkg/channels/base.go` (`Channel`, `BaseChannel`): Core interface defining 7 required methods; shared abstraction providing allowlist checking, group trigger handling, capability auto-triggering, and optional explicit session publication through `HandleMessageWithSessionKey`.
+- `pkg/channels/interfaces.go` (`TypingCapable`, `MessageEditor`, `MessageDeleter`, `ReactionCapable`, `PlaceholderCapable`, `StreamingCapable`, `FinalMessageCapable`, `CommandRegistrarCapable`): Optional capability interfaces for platform-specific features.
+- `pkg/channels/media.go`, `pkg/channels/webhook.go` (`MediaSender`, `WebhookHandler`): Optional delivery and inbound-HTTP capability interfaces discovered by Manager via type assertion.
+- `pkg/channels/registry.go` (`ChannelFactory`, `RegisterFactory`, `getFactory`): Factory registry pattern enabling self-registering channel sub-packages.
+- `pkg/channels/manager.go` (`Manager`, `channelWorker`, `runWorker`): Central orchestration for channel lifecycle, rate limiting, retry logic, and message dispatch.
+- `pkg/channels/errors.go` (`ErrNotRunning`, `ErrRateLimit`, `ErrTemporary`, `ErrSendFailed`): Sentinel errors for retry strategy classification.
+- `pkg/channels/split.go` (`SplitMessage`): Message splitting preserving code block integrity.
+- `pkg/bus/bus.go` (`MessageBus`, `PublishInbound`, `SubscribeOutbound`): Buffered channel-based (size 64) message routing between channels and agent.
+- `pkg/bus/types.go` (`InboundMessage`, `OutboundMessage`, `OutboundMediaMessage`, `SenderInfo`, `Peer`): Structured message types for bus communication.
+
+### Channel Implementations
+
+- `pkg/channels/telegram/telegram.go` (`TelegramChannel`): Telegram via telego; supports typing, editing, placeholder, media.
+- `pkg/channels/discord/discord.go` (`DiscordChannel`): Discord via discordgo; supports typing, editing, placeholder, media.
+- `pkg/channels/slack/slack.go` (`SlackChannel`): Slack via Socket Mode; supports reaction, editing, media.
+- `pkg/channels/feishu/feishu_64.go` (`FeishuChannel`): Lark SDK; supports cards, reaction, placeholder, media.
+- `pkg/channels/qq/qq.go` (`QQChannel`): Tencent QQ via botgo; WebSocket-based with deduplication.
+- `pkg/channels/claweb/claweb.go` (`ClawebChannel`): Standalone WebSocket upstream bridge compatible with CLAWeb frontdoor/browser `hello -> ready -> message` protocol; starts its own listener on `channels.claweb.listen_host/listen_port`, maps inbound text/media into PicoClaw bus messages, and reuses outbound `ReplyTo` as the assistant turn ID for frontdoor aggregation.
+- `pkg/channels/wecom/bot.go` (`WeComBotChannel`): WeCom webhook; implements WebhookHandler for callbacks.
+- `pkg/channels/wecom/official.go`, `app.go`, `aibot.go`: WeCom variants for official accounts, apps, and AI bots. `official.go` now covers callback-scoped `replyStream`, channel-local final delivery via `SendFinal`, explicit `template_card` replies, `template_card_event` auto-update handling via `aibot_respond_update_msg`, callback `response_url` markdown follow-up, reply/proactive media sending through `aibot_upload_media_init/chunk/finish`, and sanitized template-card event content that preserves only user action semantics plus card context in metadata. It also emits explicit inbound `SessionKey` values anchored by `msgid`, `task_id`, or fallback `req_id` so concurrent conversations inside the same WeCom chat do not share one history bucket.
+
+## 3. Execution Flow (LLM Retrieval Map)
+
+### Inbound Message Flow
+
+- **1. Receive:** Platform-specific channel receives message (e.g., `pkg/channels/telegram/telegram.go:handleMessage`).
+- **2. Delegate:** Channel calls `BaseChannel.HandleMessage` for ordinary chat-scoped sessions, or `BaseChannel.HandleMessageWithSessionKey` when the platform exposes a better per-conversation anchor than plain `chatID`.
+- **3. Validate:** `HandleMessage` checks allowlist via `IsAllowed`/`IsAllowedSender`, applies group trigger filtering via `ShouldRespondInGroup`.
+- **4. Capability Trigger:** Auto-triggers typing/reaction/placeholder if channel implements respective interfaces.
+- **5. Publish:** `PublishInbound` to `MessageBus` (`pkg/bus/bus.go`).
+- **6. Consume:** Agent loop consumes via `ConsumeInbound` (`pkg/agent/loop.go`).
+
+### Outbound Message Flow
+
+- **1. Route:** Agent either publishes ordinary `OutboundMessage` / `OutboundMediaMessage` to the bus, or directly calls `FinalMessageCapable.SendFinal` when a channel needs an explicit final-turn primitive distinct from ordinary sends.
+- **2. Dispatch:** `Manager.dispatchOutbound` / `dispatchOutboundMedia` routes bus traffic to per-channel workers (`pkg/channels/manager.go`).
+- **3. Pre-send:** `preSend` stops typing, undoes reactions, edits placeholders.
+- **4. Split:** Long text messages split via `SplitMessage` (`pkg/channels/split.go`).
+- **5. Send:** `sendWithRetry` or `sendMediaWithRetry` applies rate limiting and exponential backoff (`pkg/channels/manager.go`).
+- **6. Error Classify:** `ClassifySendError`/`ClassifyNetError` determines retry strategy (`pkg/channels/errutil.go`).
+
+### Channel Registration Flow
+
+- **1. Init:** Channel sub-package `init()` calls `RegisterFactory("channelName", factoryFunc)` (`pkg/channels/registry.go`).
+- **2. Lookup:** `Manager.initChannels` calls `getFactory(name)` to retrieve factory.
+- **3. Create:** Factory creates channel instance with config and MessageBus reference.
+- **4. Inject:** Manager injects `PlaceholderRecorder` and `MediaStore` if channel supports them.
+
+## 4. Design Rationale
+
+### Registry Pattern
+
+Channels self-register via `init()` functions, eliminating circular dependencies. Manager discovers channels by name lookup rather than direct imports.
+
+### Optional Capabilities
+
+Interfaces like `TypingCapable`, `ReactionCapable`, `MediaSender`, and `FinalMessageCapable` enable feature detection via type assertion. `BaseChannel.HandleMessage` auto-triggers inbound-side capabilities without each channel reimplementing logic, while `Manager` and `AgentLoop` selectively use outbound capabilities only when the channel advertises them.
+
+### Channel-Specific Finality Without Bus Pollution
+
+Some platforms distinguish between intermediate replies and the final assistant response for the same turn. PicoClaw keeps `bus.OutboundMessage` generic and exposes that distinction through `FinalMessageCapable` instead of adding channel-specific fields to the shared DTO. `wecom_official` uses this to close `replyStream` tasks with `finish=true` without forcing unrelated channels to understand WeCom semantics.
+
+### Error Classification
+
+Sentinel errors (`ErrRateLimit`, `ErrTemporary`, `ErrSendFailed`) enable appropriate retry strategies: fixed delay for rate limits, exponential backoff for temporary failures, no retry for permanent failures.
+
+### Rate Limiting
+
+Per-channel rate limits configured in `channelRateConfig`: telegram (20/s), claweb (10/s), discord (1/s), slack (1/s), matrix (2/s), line (10/s), irc (2/s).
+
+### Group Trigger Modes
+
+Centralized in `ShouldRespondInGroup`: `mention_only` (requires @mention), `prefixes` (matches command prefixes), permissive default (all messages).

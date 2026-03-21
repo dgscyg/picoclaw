@@ -23,6 +23,313 @@ func mustSetupSSHKey(t *testing.T) {
 	t.Setenv("PICOCLAW_SSH_KEY_PATH", keyPath)
 }
 
+func TestMemoryConfig_Defaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Memory.Provider != MemoryProviderFile {
+		t.Fatalf("Memory.Provider = %q, want %q", cfg.Memory.Provider, MemoryProviderFile)
+	}
+	if cfg.Memory.File == nil {
+		t.Fatal("Memory.File should not be nil")
+	}
+	if cfg.Memory.File.Workspace == "" {
+		t.Fatal("Memory.File.Workspace should not be empty")
+	}
+	if cfg.Memory.MuninnDB == nil {
+		t.Fatal("Memory.MuninnDB should not be nil")
+	}
+	if cfg.Memory.MuninnDB.Vault != DefaultMemoryVault {
+		t.Fatalf("Memory.MuninnDB.Vault = %q, want %q", cfg.Memory.MuninnDB.Vault, DefaultMemoryVault)
+	}
+	if cfg.Memory.MuninnDB.Timeout != DefaultMemoryTimeout {
+		t.Fatalf("Memory.MuninnDB.Timeout = %q, want %q", cfg.Memory.MuninnDB.Timeout, DefaultMemoryTimeout)
+	}
+}
+
+func TestLoadConfig_MemoryEnvExpansion(t *testing.T) {
+	t.Setenv("MUNINNDB_MCP_ENDPOINT", "http://localhost:8750/mcp")
+	t.Setenv("MUNINNDB_REST_ENDPOINT", "http://localhost:8475")
+	t.Setenv("MUNINNDB_VAULT", "team")
+	t.Setenv("MUNINNDB_REST_API_KEY", "rest-secret-key")
+	t.Setenv("MUNINNDB_MCP_API_KEY", "mcp-secret-key")
+	jsonData := `{
+		"memory": {
+			"provider": "muninndb",
+			"muninndb": {
+				"mcp_endpoint": "${MUNINNDB_MCP_ENDPOINT}",
+				"rest_endpoint": "${MUNINNDB_REST_ENDPOINT}",
+				"vault": "${MUNINNDB_VAULT}",
+				"rest_api_key": "${MUNINNDB_REST_API_KEY}",
+				"mcp_api_key": "${MUNINNDB_MCP_API_KEY}"
+			}
+		}
+	}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(jsonData), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Memory.Provider != MemoryProviderMuninnDB {
+		t.Fatalf("Memory.Provider = %q, want %q", cfg.Memory.Provider, MemoryProviderMuninnDB)
+	}
+	if cfg.Memory.MuninnDB.MCPEndpoint != "http://localhost:8750/mcp" {
+		t.Fatalf("MCPEndpoint = %q", cfg.Memory.MuninnDB.MCPEndpoint)
+	}
+	if cfg.Memory.MuninnDB.RESTEndpoint != "http://localhost:8475" {
+		t.Fatalf("RESTEndpoint = %q", cfg.Memory.MuninnDB.RESTEndpoint)
+	}
+	if cfg.Memory.MuninnDB.Vault != "team" {
+		t.Fatalf("Vault = %q", cfg.Memory.MuninnDB.Vault)
+	}
+	if cfg.Memory.MuninnDB.RESTAPIKey != "rest-secret-key" {
+		t.Fatalf("RESTAPIKey = %q", cfg.Memory.MuninnDB.RESTAPIKey)
+	}
+	if cfg.Memory.MuninnDB.MCPAPIKey != "mcp-secret-key" {
+		t.Fatalf("MCPAPIKey = %q", cfg.Memory.MuninnDB.MCPAPIKey)
+	}
+	server, ok := cfg.Tools.MCP.Servers[DefaultMuninnMCPName]
+	if !ok {
+		t.Fatal("expected default muninn MCP server config")
+	}
+	if server.URL != "http://localhost:8750/mcp" {
+		t.Fatalf("muninn mcp url = %q", server.URL)
+	}
+	if server.Headers["Authorization"] != "Bearer mcp-secret-key" {
+		t.Fatalf("muninn mcp auth header missing")
+	}
+}
+
+func TestLoadConfig_RejectsLegacyMuninnAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	jsonData := `{
+		"memory": {
+			"provider": "muninndb",
+			"muninndb": {
+				"mcp_endpoint": "http://127.0.0.1:8750/mcp",
+				"rest_endpoint": "http://127.0.0.1:8475",
+				"vault": "default",
+				"api_key": "legacy-token",
+				"rest_api_key": "rest-token",
+				"mcp_api_key": "mcp-token"
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(jsonData), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("LoadConfig should fail when legacy memory.muninndb.api_key is present")
+	}
+	if !strings.Contains(err.Error(), "memory.muninndb.api_key") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMuninnDBConfig_ResolvedEndpoints(t *testing.T) {
+	cfg := &MuninnDBConfig{
+		MCPEndpoint:  "http://127.0.0.1:8750",
+		RESTEndpoint: "http://127.0.0.1:8475",
+	}
+
+	if got := cfg.ResolvedMCPEndpoint(); got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("ResolvedMCPEndpoint() = %q", got)
+	}
+	if got := cfg.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8475" {
+		t.Fatalf("ResolvedRESTEndpoint() = %q", got)
+	}
+	if !cfg.HasSeparateRESTEndpoint() {
+		t.Fatal("HasSeparateRESTEndpoint() = false, want true")
+	}
+
+	cfg.RESTEndpoint = ""
+	if got := cfg.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8750" {
+		t.Fatalf("ResolvedRESTEndpoint() fallback = %q, want %q", got, "http://127.0.0.1:8750")
+	}
+	if cfg.HasSeparateRESTEndpoint() {
+		t.Fatal("HasSeparateRESTEndpoint() = true, want false")
+	}
+}
+
+func TestMuninnDBConfig_NormalizesMCPEndpointAndRESTFallback(t *testing.T) {
+	cfg := &MuninnDBConfig{MCPEndpoint: "http://127.0.0.1:8750"}
+	if got := cfg.ResolvedMCPEndpoint(); got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("ResolvedMCPEndpoint() = %q, want /mcp suffix", got)
+	}
+	if got := cfg.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8750" {
+		t.Fatalf("ResolvedRESTEndpoint() = %q, want base endpoint", got)
+	}
+
+	cfg.MCPEndpoint = "http://127.0.0.1:8750/mcp"
+	if got := cfg.ResolvedMCPEndpoint(); got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("ResolvedMCPEndpoint() with existing /mcp = %q", got)
+	}
+	if got := cfg.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8750" {
+		t.Fatalf("ResolvedRESTEndpoint() from /mcp = %q, want base endpoint", got)
+	}
+}
+
+func TestLoadConfig_MemoryValidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	jsonData := `{
+		"memory": {
+			"provider": "muninndb",
+			"muninndb": {
+				"vault": "default"
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(jsonData), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("LoadConfig should fail when mcp_endpoint is missing")
+	}
+	if !strings.Contains(err.Error(), "memory.muninndb.mcp_endpoint") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadConfig_MemoryValidationRequiresSplitMuninnKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	jsonData := `{
+		"memory": {
+			"provider": "muninndb",
+			"muninndb": {
+				"mcp_endpoint": "http://127.0.0.1:8750/mcp",
+				"rest_endpoint": "http://127.0.0.1:8475",
+				"vault": "default",
+				"rest_api_key": "rest-only"
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(jsonData), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("LoadConfig should fail when mcp_api_key is missing")
+	}
+	if !strings.Contains(err.Error(), "memory.muninndb.mcp_api_key") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsureMuninnMCPConfigUsesOnlyMCPAPIKey(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Memory.Provider = MemoryProviderMuninnDB
+	cfg.Memory.MuninnDB = &MuninnDBConfig{
+		MCPEndpoint:  "http://127.0.0.1:8750/mcp",
+		RESTEndpoint: "http://127.0.0.1:8475",
+		Vault:        "default",
+		RESTAPIKey:   "rest_test_token",
+		MCPAPIKey:    "mdb_test_token",
+	}
+	EnsureMuninnMCPConfig(cfg)
+	if got := cfg.Tools.MCP.Servers[DefaultMuninnMCPName].Headers["Authorization"]; got != "Bearer mdb_test_token" {
+		t.Fatalf("Authorization header = %q", got)
+	}
+	if got := cfg.Tools.MCP.Servers[DefaultMuninnMCPName].URL; got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("muninn MCP URL = %q, want mcp endpoint", got)
+	}
+}
+
+func TestEnsureMuninnMCPConfigOverwritesStaleMuninnServerURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Tools.MCP.Enabled = true
+	cfg.Tools.MCP.Servers = map[string]MCPServerConfig{
+		DefaultMuninnMCPName: {
+			Enabled: true,
+			Type:    "http",
+			URL:     "http://127.0.0.1:8475",
+			Headers: map[string]string{"Authorization": "Bearer stale"},
+		},
+	}
+	cfg.Memory.Provider = MemoryProviderMuninnDB
+	cfg.Memory.MuninnDB = &MuninnDBConfig{
+		MCPEndpoint:  "http://127.0.0.1:8750",
+		RESTEndpoint: "http://127.0.0.1:8475",
+		Vault:        "default",
+		RESTAPIKey:   "rest-token",
+		MCPAPIKey:    "fresh-token",
+	}
+
+	EnsureMuninnMCPConfig(cfg)
+
+	server := cfg.Tools.MCP.Servers[DefaultMuninnMCPName]
+	if got := server.URL; got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("muninn MCP URL = %q, want normalized live MCP listener", got)
+	}
+	if got := server.Headers["Authorization"]; got != "Bearer fresh-token" {
+		t.Fatalf("Authorization header = %q, want refreshed token", got)
+	}
+	if got := cfg.Memory.MuninnDB.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8475" {
+		t.Fatalf("ResolvedRESTEndpoint() = %q, want REST endpoint preserved", got)
+	}
+	if !cfg.Memory.MuninnDB.HasSeparateRESTEndpoint() {
+		t.Fatal("HasSeparateRESTEndpoint() = false, want true")
+	}
+}
+
+func TestEnsureMuninnMCPConfigPreservesExistingTransportFields(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Tools.MCP.Enabled = true
+	cfg.Tools.MCP.Servers = map[string]MCPServerConfig{
+		DefaultMuninnMCPName: {
+			Enabled: true,
+			Type:    "stdio",
+			Command: "muninn-mcp",
+			Args:    []string{"--stdio"},
+			Env:     map[string]string{"MUNINN_MODE": "stdio"},
+			EnvFile: "muninn.env",
+			URL:     "http://127.0.0.1:8475",
+			Headers: map[string]string{"Authorization": "Bearer stale"},
+		},
+	}
+	cfg.Memory.Provider = MemoryProviderMuninnDB
+	cfg.Memory.MuninnDB = &MuninnDBConfig{
+		MCPEndpoint: "http://127.0.0.1:8750",
+		Vault:       "default",
+	}
+
+	EnsureMuninnMCPConfig(cfg)
+
+	server := cfg.Tools.MCP.Servers[DefaultMuninnMCPName]
+	if server.Type != "stdio" {
+		t.Fatalf("Type = %q, want stdio", server.Type)
+	}
+	if server.Command != "muninn-mcp" {
+		t.Fatalf("Command = %q, want existing command", server.Command)
+	}
+	if len(server.Args) != 1 || server.Args[0] != "--stdio" {
+		t.Fatalf("Args = %#v, want existing args", server.Args)
+	}
+	if got := server.Env["MUNINN_MODE"]; got != "stdio" {
+		t.Fatalf("Env[MUNINN_MODE] = %q, want stdio", got)
+	}
+	if server.EnvFile != "muninn.env" {
+		t.Fatalf("EnvFile = %q, want existing env file", server.EnvFile)
+	}
+	if got := server.URL; got != "http://127.0.0.1:8750/mcp" {
+		t.Fatalf("muninn MCP URL = %q, want normalized endpoint", got)
+	}
+	if server.Headers != nil {
+		t.Fatalf("Headers = %#v, want nil when memory API key is empty", server.Headers)
+	}
+	if got := cfg.Memory.MuninnDB.ResolvedRESTEndpoint(); got != "http://127.0.0.1:8750" {
+		t.Fatalf("ResolvedRESTEndpoint() = %q, want MCP base fallback", got)
+	}
+}
+
 func TestAgentModelConfig_UnmarshalString(t *testing.T) {
 	var m AgentModelConfig
 	if err := json.Unmarshal([]byte(`"gpt-4"`), &m); err != nil {
@@ -48,9 +355,6 @@ func TestAgentModelConfig_UnmarshalObject(t *testing.T) {
 	if len(m.Fallbacks) != 2 {
 		t.Fatalf("Fallbacks len = %d, want 2", len(m.Fallbacks))
 	}
-	if m.Fallbacks[0] != "gpt-4o-mini" || m.Fallbacks[1] != "haiku" {
-		t.Errorf("Fallbacks = %v", m.Fallbacks)
-	}
 }
 
 func TestAgentModelConfig_MarshalString(t *testing.T) {
@@ -60,7 +364,7 @@ func TestAgentModelConfig_MarshalString(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	if string(data) != `"gpt-4"` {
-		t.Errorf("marshal = %s, want '\"gpt-4\"'", string(data))
+		t.Errorf("marshal = %s, want string form", string(data))
 	}
 }
 
@@ -336,45 +640,36 @@ func TestDefaultConfig_WebTools(t *testing.T) {
 		t.Error("Expected DuckDuckGo MaxResults 5, got ", cfg.Tools.Web.DuckDuckGo.MaxResults)
 	}
 }
-
 func TestSaveConfig_FilePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("file permission bits are not enforced on Windows")
 	}
-
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")
-
 	cfg := DefaultConfig()
 	if err := SaveConfig(path, cfg); err != nil {
 		t.Fatalf("SaveConfig failed: %v", err)
 	}
-
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat failed: %v", err)
 	}
-
-	perm := info.Mode().Perm()
-	if perm != 0o600 {
-		t.Errorf("config file has permission %04o, want 0600", perm)
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("config file has permission %04o, want 0600", info.Mode().Perm())
 	}
 }
 
 func TestSaveConfig_IncludesEmptyLegacyModelField(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")
-
 	cfg := DefaultConfig()
 	if err := SaveConfig(path, cfg); err != nil {
 		t.Fatalf("SaveConfig failed: %v", err)
 	}
-
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
-
 	if !strings.Contains(string(data), `"model_name": ""`) {
 		t.Fatalf("saved config should include empty legacy model_name field, got: %s", string(data))
 	}

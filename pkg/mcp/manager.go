@@ -283,7 +283,8 @@ func (m *Manager) ConnectServer(
 			})
 
 		sseTransport := &mcp.StreamableClientTransport{
-			Endpoint: cfg.URL,
+			Endpoint:             cfg.URL,
+			DisableStandaloneSSE: true,
 		}
 
 		// Add custom headers if provided

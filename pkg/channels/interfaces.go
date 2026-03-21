@@ -49,6 +49,14 @@ type StreamingCapable interface {
 	BeginStream(ctx context.Context, chatID string) (Streamer, error)
 }
 
+// FinalMessageCapable — channels that distinguish between intermediate
+// replies and the final assistant reply for a turn.
+// Channels that do not need this distinction can ignore it and continue
+// using Channel.Send via the outbound bus.
+type FinalMessageCapable interface {
+	SendFinal(ctx context.Context, msg bus.OutboundMessage) error
+}
+
 // Streamer is defined in pkg/bus to avoid circular imports.
 // This alias keeps channel implementations using channels.Streamer unchanged.
 type Streamer = bus.Streamer

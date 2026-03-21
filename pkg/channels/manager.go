@@ -59,6 +59,7 @@ type placeholderEntry struct {
 // channelRateConfig maps channel name to per-second rate limit.
 var channelRateConfig = map[string]float64{
 	"telegram": 20,
+	"claweb":   10,
 	"discord":  1,
 	"slack":    1,
 	"matrix":   2,
@@ -381,7 +382,13 @@ func (m *Manager) initChannels(channels *config.ChannelsConfig) error {
 		m.initChannel("wecom_aibot", "WeCom AI Bot")
 	}
 
-	if channels.WeComApp.Enabled && channels.WeComApp.CorpID != "" {
+	if m.config.Channels.WeComOfficial.Enabled &&
+		m.config.Channels.WeComOfficial.BotID != "" &&
+		m.config.Channels.WeComOfficial.Secret != "" {
+		m.initChannel("wecom_official", "WeCom Official")
+	}
+
+	if m.config.Channels.WeComApp.Enabled && m.config.Channels.WeComApp.CorpID != "" {
 		m.initChannel("wecom_app", "WeCom App")
 	}
 
@@ -395,6 +402,13 @@ func (m *Manager) initChannels(channels *config.ChannelsConfig) error {
 
 	if channels.IRC.Enabled && channels.IRC.Server != "" {
 		m.initChannel("irc", "IRC")
+	}
+
+	clawebCfg := m.config.Channels.Claweb
+	if clawebCfg.Enabled &&
+		clawebCfg.ListenPort > 0 &&
+		(clawebCfg.AuthToken != "" || clawebCfg.AuthTokenFile != "") {
+		m.initChannel("claweb", "Claweb")
 	}
 
 	logger.InfoCF("channels", "Channel initialization completed", map[string]any{

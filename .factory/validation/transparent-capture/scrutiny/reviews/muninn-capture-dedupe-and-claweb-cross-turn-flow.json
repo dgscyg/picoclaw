@@ -1,0 +1,34 @@
+{
+  "featureId": "muninn-capture-dedupe-and-claweb-cross-turn-flow",
+  "reviewedAt": "2026-03-19T10:12:00Z",
+  "commitId": "6c57a911edc616f010bb3bd4e1983dd8ef780973",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The commit improves low-confidence filtering and fuzzy duplicate suppression in the capture path, but it still does not satisfy the feature's required claweb cross-turn proof and its confidence heuristic is overly strict for plain durable preference statements.",
+    "issues": [
+      {
+        "file": "pkg/agent/muninn_auto_capture.go",
+        "line": 274,
+        "severity": "blocking",
+        "description": "After a message matches a durable capture category, muninnAutoCaptureConfidence still rejects plain durable preferences unless they include booster phrases such as `every project`, `from now on`, or similar. For example, `I prefer dark mode for this repo.` or `My preferred editor is Helix.` reaches the preference branch but scores only 0.86 because the base 0.78 plus the `prefer` or `preferred` bonus 0.08 never reaches the 0.90 threshold, so durable preferences are dropped even though the feature is supposed to filter low-confidence noise, not require special phrasing."
+      },
+      {
+        "file": "pkg/agent/muninn_auto_capture_test.go",
+        "line": 239,
+        "severity": "blocking",
+        "description": "The added end-to-end test only verifies that a duplicate write is skipped during a single ProcessDirectWithChannel turn. It does not add any claweb multi-turn test or live evidence that a fact captured in one claweb turn is automatically recalled in a later turn without manual memory tools, so VAL-CROSS-001 remains unproven in this feature review."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The go-memory-worker skill requires manual claweb verification for end-to-end or cross-turn behavior, but this worker handoff substituted code-path review for that required live check.",
+      "evidence": "D:\\tmp\\claw\\picoclaw\\.factory\\skills\\go-memory-worker\\SKILL.md step 7 requires manual verification for cross-turn flow; handoff C:\\Users\\杨旭\\.factory\\missions\\2f567679-e314-4c0f-83af-a6c10ee2820a\\handoffs\\2026-03-19T09-42-23-426Z__muninn-capture-dedupe-and-claweb-cross-turn-flow__1cc2fd87-1f42-4b31-abf3-278ce1cb9341.json reports only tests/lint plus an interactiveChecks note that it merely reviewed the capture path and test-backed request flow."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail: the dedupe improvements are plausible, but the feature still lacks the required claweb multi-turn capture-then-recall proof and the new confidence gate drops plainly stated durable preferences."
+}

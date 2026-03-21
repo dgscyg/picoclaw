@@ -45,6 +45,16 @@ func DefaultConfig() *Config {
 		Session: SessionConfig{
 			DMScope: "per-channel-peer",
 		},
+		Memory: MemoryConfig{
+			Provider: MemoryProviderFile,
+			File: &FileMemoryConfig{
+				Workspace: filepath.Join(workspacePath, "memory"),
+			},
+			MuninnDB: &MuninnDBConfig{
+				Vault:   DefaultMemoryVault,
+				Timeout: DefaultMemoryTimeout,
+			},
+		},
 		Channels: ChannelsConfig{
 			WhatsApp: WhatsAppConfig{
 				Enabled:          false,
@@ -84,6 +94,12 @@ func DefaultConfig() *Config {
 				Host:      "0.0.0.0",
 				Port:      18790,
 				AllowFrom: FlexibleStringSlice{},
+			},
+			Claweb: ClawebConfig{
+				Enabled:    false,
+				ListenHost: "127.0.0.1",
+				ListenPort: 18999,
+				AllowFrom:  FlexibleStringSlice{},
 			},
 			QQ: QQConfig{
 				Enabled:              false,
@@ -173,6 +189,22 @@ func DefaultConfig() *Config {
 				MaxSteps:          10,
 				WelcomeMessage:    "Hello! I'm your AI assistant. How can I help you today?",
 				ProcessingMessage: DefaultWeComAIBotProcessingMessage,
+			},
+			WeComOfficial: WeComOfficialConfig{
+				Enabled:      false,
+				BotID:        "",
+				Secret:       "",
+				WebSocketURL: "wss://openws.work.weixin.qq.com",
+				AllowFrom:    FlexibleStringSlice{},
+				Placeholder: PlaceholderConfig{
+					Enabled: true,
+					Text:    "Thinking... 💭",
+				},
+				Card: CardConfig{
+					Enabled: false,
+					Title:   "PicoClaw",
+				},
+				WelcomeMessage: "",
 			},
 			Pico: PicoConfig{
 				Enabled:        false,

@@ -87,12 +87,30 @@ func (mb *MessageBus) InboundChan() <-chan InboundMessage {
 	return mb.inbound
 }
 
+func (mb *MessageBus) ConsumeInbound(ctx context.Context) (InboundMessage, bool) {
+	select {
+	case msg, ok := <-mb.inbound:
+		return msg, ok
+	case <-ctx.Done():
+		return InboundMessage{}, false
+	}
+}
+
 func (mb *MessageBus) PublishOutbound(ctx context.Context, msg OutboundMessage) error {
 	return publish(ctx, mb, mb.outbound, msg)
 }
 
 func (mb *MessageBus) OutboundChan() <-chan OutboundMessage {
 	return mb.outbound
+}
+
+func (mb *MessageBus) SubscribeOutbound(ctx context.Context) (OutboundMessage, bool) {
+	select {
+	case msg, ok := <-mb.outbound:
+		return msg, ok
+	case <-ctx.Done():
+		return OutboundMessage{}, false
+	}
 }
 
 func (mb *MessageBus) PublishOutboundMedia(ctx context.Context, msg OutboundMediaMessage) error {
@@ -114,6 +132,15 @@ func (mb *MessageBus) GetStreamer(ctx context.Context, channel, chatID string) (
 		return d.GetStreamer(ctx, channel, chatID)
 	}
 	return nil, false
+}
+
+func (mb *MessageBus) SubscribeOutboundMedia(ctx context.Context) (OutboundMediaMessage, bool) {
+	select {
+	case msg, ok := <-mb.outboundMedia:
+		return msg, ok
+	case <-ctx.Done():
+		return OutboundMediaMessage{}, false
+	}
 }
 
 func (mb *MessageBus) Close() {

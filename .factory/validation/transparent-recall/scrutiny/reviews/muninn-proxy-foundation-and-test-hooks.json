@@ -1,0 +1,45 @@
+{
+  "featureId": "muninn-proxy-foundation-and-test-hooks",
+  "reviewedAt": "2026-03-19T00:00:00Z",
+  "commitId": "81dc309b265e652c3892c3a627a3ce7eee37b456",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The foundation work mostly matches the intended scaffolding: shared Muninn proxy structs, structured log helpers, split REST/MCP endpoint plumbing, and validation helpers are present and covered by focused tests. However, the feature no longer aligns with the mission boundary that validation must use the user-approved default vault `default`; the implemented dry-run validator and tests still hard-code the previous dedicated vault behavior, so the foundation cannot be considered correct for the current mission contract.",
+    "issues": [
+      {
+        "file": "pkg/agent/muninn_proxy.go",
+        "line": 98,
+        "severity": "blocking",
+        "description": "DefaultMuninnValidationDryRunConfig() still hard-codes MuninnValidationVault and ValidateConfig() rejects any config whose vault differs from that constant. This foundation feature was explicitly updated to use the user-approved validation vault `default`, but the code continues enforcing the older dedicated-vault validation path, so later recall/capture validation plumbing is built on the wrong boundary."
+      },
+      {
+        "file": "pkg/agent/muninn_proxy_test.go",
+        "line": 28,
+        "severity": "blocking",
+        "description": "The regression tests only verify acceptance of the hard-coded validation vault and rejection of any other vault. Because they encode the obsolete vault rule, they would not catch the mission-required switch to the approved `default` vault, leaving a critical contract mismatch undetected."
+      },
+      {
+        "file": "C:\\Users\\杨旭\\.factory\\missions\\2f567679-e314-4c0f-83af-a6c10ee2820a\\handoffs\\2026-03-19T03-15-06-413Z__muninn-proxy-foundation-and-test-hooks__357263fb-dfad-41f1-9c0e-31726cdb1d61.json",
+        "line": 1,
+        "severity": "non_blocking",
+        "description": "The handoff claims the feature was validated against a dedicated vault `picoclaw-transparent-layer-test`, which contradicts the mission guidance and AGENTS note that validation must target `default`. This makes the recorded verification evidence weaker because it does not exercise the actual approved validation boundary."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `go-memory-worker` skill correctly says the validation vault target is `default`, but this worker still validated and documented a dedicated test vault path. The skill procedure matched mission reality; the deviation was not justified and should remain a review signal rather than a skill update.",
+      "evidence": ".factory/skills/go-memory-worker/SKILL.md step 3 says the validation vault target is `default`; the reviewed handoff instead reports `tmp/claweb-dryrun.json` targeted `picoclaw-transparent-layer-test` and describes that as successful validation."
+    },
+    {
+      "area": "conventions",
+      "observation": "Mission shared state is internally inconsistent around the lint gate: the worker added a library note saying `.factory/scripts/lint-changed.mjs` is now the approved wrapper, and `.factory/services.yaml` was updated accordingly after this feature. Future reviewers should treat branch-level lint expectations as versioned shared state tied to the current commit, not to the original feature handoff.",
+      "evidence": "The reviewed feature commit is `81dc309`, whose only diff is `.factory/library/environment.md`; `git show 81dc309^:.factory/services.yaml` still had `lint: golangci-lint run`, while the current `.factory/services.yaml` now points to `node ./.factory/scripts/lint-changed.mjs`."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature metadata, transcript skeleton, handoff, commit diff, relevant code, skill, services manifest, and library notes. The feature establishes the intended Muninn foundation scaffolding, but it fails review because the implemented validation-vault plumbing still enforces the obsolete dedicated vault instead of the mission-approved `default` vault, so the foundation is misaligned with the current validation boundary."
+}

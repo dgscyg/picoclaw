@@ -1,0 +1,26 @@
+{
+  "featureId": "muninn-consolidation-conflict-handling-and-recovery",
+  "reviewedAt": "2026-03-20T00:00:00Z",
+  "commitId": "bc78048a626c574778de7967fcae71782a6110a9",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The original feature commit implements conflict-aware recall filtering, conflict-note surfacing, and capture-triggered recall-cache invalidation, and the follow-up fix commit directly closes the prior blocking gap by relaxing relatedness tests and attaching fresh approved-surface VAL-CROSS-002 disruption/recovery evidence. The rerun evidence shows a normal claweb reply during temporary disruption and a later recovered turn with muninn_auto_recall_hit, so the prior failure is adequately addressed.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "services",
+      "observation": "The current `.factory/services.yaml` claweb_frontdoor start command still documents `CLAWEB_UPSTREAM_TOKEN_FILE`, but the accepted Windows rerun proof required same-shell inline `CLAWEB_UPSTREAM_TOKEN` propagation to preserve frontdoor auth in startup logs.",
+      "evidence": "D:\\tmp\\claw\\picoclaw\\.factory\\services.yaml defines `CLAWEB_UPSTREAM_TOKEN_FILE`; `D:\\tmp\\claw\\picoclaw\\tmp\\same-shell-frontdoor-start.log` proves the successful rerun used inline `CLAWEB_UPSTREAM_TOKEN=claweb-local-20260317` with the intended `CLAWEB_LOGIN_CONFIG`."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Shared environment knowledge still says the live Muninn MCP listener may reject initialization with `session not found`, but the final consolidation rerun evidence shows a newer local reality of `Unauthorized` for the broken startup path while the accepted recovery proof used REST-backed auto recall plus claweb logs rather than manual MCP success.",
+      "evidence": "D:\\tmp\\claw\\picoclaw\\.factory\\library\\environment.md mentions `session not found`; `D:\\tmp\\claw\\picoclaw\\tmp\\gateway-val-cross-002.log` shows the disrupted proof run, while `D:\\tmp\\claw\\picoclaw\\tmp\\same-shell-frontdoor-start.log` and `D:\\tmp\\claw\\picoclaw\\tmp\\claweb-frontdoor-val-cross-002.log` capture the accepted path without relying on manual MCP tool success."
+    }
+  ],
+  "addressesFailureFrom": "D:\\tmp\\claw\\picoclaw\\.factory\\validation\\transparent-consolidation\\scrutiny\\reviews\\muninn-consolidation-conflict-handling-and-recovery.json",
+  "summary": "Rerun passed: I reviewed the original feature diff, the fix feature diff, both relevant transcripts/handoffs, and the fresh claweb/frontdoor evidence. The fix feature resolves the prior missing VAL-CROSS-002 proof and also adds focused cache-relatedness regression coverage, so the original consolidation feature now meets its required behavior."
+}

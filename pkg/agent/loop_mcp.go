@@ -8,23 +8,27 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
-	"github.com/sipeed/picoclaw/pkg/mcp"
+	picomcp "github.com/sipeed/picoclaw/pkg/mcp"
 	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
 type mcpRuntime struct {
 	initOnce sync.Once
 	mu       sync.Mutex
-	manager  *mcp.Manager
+	manager  *picomcp.Manager
 	initErr  error
 }
 
-func (r *mcpRuntime) setManager(manager *mcp.Manager) {
+func (r *mcpRuntime) setManager(manager *picomcp.Manager) {
 	r.mu.Lock()
 	r.manager = manager
 	r.initErr = nil
@@ -43,7 +47,7 @@ func (r *mcpRuntime) getInitErr() error {
 	return r.initErr
 }
 
-func (r *mcpRuntime) takeManager() *mcp.Manager {
+func (r *mcpRuntime) takeManager() *picomcp.Manager {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	manager := r.manager
@@ -81,7 +85,7 @@ func (al *AgentLoop) ensureMCPInitialized(ctx context.Context) error {
 	}
 
 	al.mcp.initOnce.Do(func() {
-		mcpManager := mcp.NewManager()
+		mcpManager := picomcp.NewManager()
 
 		defaultAgent := al.registry.GetDefaultAgent()
 		workspacePath := al.cfg.WorkspacePath()
@@ -125,7 +129,22 @@ func (al *AgentLoop) ensureMCPInitialized(ctx context.Context) error {
 						continue
 					}
 
-					mcpTool := tools.NewMCPTool(mcpManager, serverName, tool)
+					mcpTool := tools.NewMCPToolWithArgPolicy(
+						mcpManager,
+						serverName,
+						tool,
+						nil,
+						al.muninnForcedMCPArgs(serverName, tool),
+					)
+					if forcedArgs := al.muninnForcedMCPArgs(serverName, tool); len(forcedArgs) > 0 {
+						logger.DebugCF("agent", "Applying forced MCP tool arguments",
+							map[string]any{
+								"agent_id":    agentID,
+								"server":      serverName,
+								"tool":        tool.Name,
+								"forced_args": forcedArgs,
+							})
+					}
 
 					if registerAsHidden {
 						agent.Tools.RegisterHidden(mcpTool)
@@ -220,4 +239,65 @@ func serverIsDeferred(discoveryEnabled bool, serverCfg config.MCPServerConfig) b
 		return *serverCfg.Deferred
 	}
 	return true
+}
+
+func (al *AgentLoop) muninnForcedMCPArgs(serverName string, tool *mcp.Tool) map[string]any {
+	if al == nil || al.cfg == nil || serverName != config.DefaultMuninnMCPName {
+		return nil
+	}
+	if strings.TrimSpace(al.cfg.Memory.Provider) != config.MemoryProviderMuninnDB || al.cfg.Memory.MuninnDB == nil {
+		return nil
+	}
+	vault := strings.TrimSpace(al.cfg.Memory.MuninnDB.Vault)
+	if vault == "" || tool == nil {
+		return nil
+	}
+	toolName := strings.TrimSpace(tool.Name)
+	if !strings.HasPrefix(toolName, "muninn_") && !mcpToolHasInputProperty(tool, "vault") {
+		return nil
+	}
+	return map[string]any{"vault": vault}
+}
+
+func mcpToolHasInputProperty(tool *mcp.Tool, property string) bool {
+	if tool == nil || property == "" || tool.InputSchema == nil {
+		return false
+	}
+	schemaMap, ok := normalizeMCPSchema(tool.InputSchema)
+	if !ok {
+		return false
+	}
+	props, ok := schemaMap["properties"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, exists := props[property]
+	return exists
+}
+
+func normalizeMCPSchema(schema any) (map[string]any, bool) {
+	if schema == nil {
+		return nil, false
+	}
+	if schemaMap, ok := schema.(map[string]any); ok {
+		return schemaMap, true
+	}
+	var jsonData []byte
+	switch v := schema.(type) {
+	case json.RawMessage:
+		jsonData = v
+	case []byte:
+		jsonData = v
+	default:
+		var err error
+		jsonData, err = json.Marshal(schema)
+		if err != nil {
+			return nil, false
+		}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(jsonData, &out); err != nil {
+		return nil, false
+	}
+	return out, true
 }

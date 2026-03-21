@@ -80,6 +80,7 @@ type Config struct {
 	Agents    AgentsConfig    `json:"agents"`
 	Bindings  []AgentBinding  `json:"bindings,omitempty"`
 	Session   SessionConfig   `json:"session,omitempty"`
+	Memory    MemoryConfig    `json:"memory,omitempty"`
 	Channels  ChannelsConfig  `json:"channels"`
 	Providers ProvidersConfig `json:"providers,omitempty"`
 	ModelList []ModelConfig   `json:"model_list"` // New model-centric provider configuration
@@ -212,11 +213,11 @@ type SessionConfig struct {
 // (message length, code blocks, tool call history, conversation depth, attachments).
 // Messages scoring below Threshold are sent to LightModel; all others use the
 // agent's primary model. This reduces cost and latency for simple tasks without
-// requiring any keyword matching — all scoring is language-agnostic.
+// requiring any keyword matching 鈥?all scoring is language-agnostic.
 type RoutingConfig struct {
 	Enabled    bool    `json:"enabled"`
 	LightModel string  `json:"light_model"` // model_name from model_list to use for simple tasks
-	Threshold  float64 `json:"threshold"`   // complexity score in [0,1]; score >= threshold → primary model
+	Threshold  float64 `json:"threshold"`   // complexity score in [0,1]; score >= threshold 鈫?primary model
 }
 
 // ToolFeedbackConfig controls whether tool execution details are sent to the
@@ -282,23 +283,25 @@ func (d *AgentDefaults) GetModelName() string {
 }
 
 type ChannelsConfig struct {
-	WhatsApp   WhatsAppConfig   `json:"whatsapp"`
-	Telegram   TelegramConfig   `json:"telegram"`
-	Feishu     FeishuConfig     `json:"feishu"`
-	Discord    DiscordConfig    `json:"discord"`
-	MaixCam    MaixCamConfig    `json:"maixcam"`
-	QQ         QQConfig         `json:"qq"`
-	DingTalk   DingTalkConfig   `json:"dingtalk"`
-	Slack      SlackConfig      `json:"slack"`
-	Matrix     MatrixConfig     `json:"matrix"`
-	LINE       LINEConfig       `json:"line"`
-	OneBot     OneBotConfig     `json:"onebot"`
-	WeCom      WeComConfig      `json:"wecom"`
-	WeComApp   WeComAppConfig   `json:"wecom_app"`
-	WeComAIBot WeComAIBotConfig `json:"wecom_aibot"`
-	Pico       PicoConfig       `json:"pico"`
-	PicoClient PicoClientConfig `json:"pico_client"`
-	IRC        IRCConfig        `json:"irc"`
+	WhatsApp      WhatsAppConfig      `json:"whatsapp"`
+	Telegram      TelegramConfig      `json:"telegram"`
+	Feishu        FeishuConfig        `json:"feishu"`
+	Discord       DiscordConfig       `json:"discord"`
+	MaixCam       MaixCamConfig       `json:"maixcam"`
+	Claweb        ClawebConfig        `json:"claweb"`
+	QQ            QQConfig            `json:"qq"`
+	DingTalk      DingTalkConfig      `json:"dingtalk"`
+	Slack         SlackConfig         `json:"slack"`
+	Matrix        MatrixConfig        `json:"matrix"`
+	LINE          LINEConfig          `json:"line"`
+	OneBot        OneBotConfig        `json:"onebot"`
+	WeCom         WeComConfig         `json:"wecom"`
+	WeComApp      WeComAppConfig      `json:"wecom_app"`
+	WeComAIBot    WeComAIBotConfig    `json:"wecom_aibot"`
+	WeComOfficial WeComOfficialConfig `json:"wecom_official"`
+	Pico          PicoConfig          `json:"pico"`
+	PicoClient    PicoClientConfig    `json:"pico_client"`
+	IRC           IRCConfig           `json:"irc"`
 }
 
 // GroupTriggerConfig controls when the bot responds in group chats.
@@ -322,6 +325,12 @@ type StreamingConfig struct {
 	Enabled         bool `json:"enabled,omitempty"          env:"PICOCLAW_CHANNELS_TELEGRAM_STREAMING_ENABLED"`
 	ThrottleSeconds int  `json:"throttle_seconds,omitempty" env:"PICOCLAW_CHANNELS_TELEGRAM_STREAMING_THROTTLE_SECONDS"`
 	MinGrowthChars  int  `json:"min_growth_chars,omitempty" env:"PICOCLAW_CHANNELS_TELEGRAM_STREAMING_MIN_GROWTH_CHARS"`
+}
+
+// CardConfig controls channel-local text-to-card rendering.
+type CardConfig struct {
+	Enabled bool   `json:"enabled,omitempty"`
+	Title   string `json:"title,omitempty"`
 }
 
 type WhatsAppConfig struct {
@@ -379,6 +388,17 @@ type MaixCamConfig struct {
 	Port               int                 `json:"port"                 env:"PICOCLAW_CHANNELS_MAIXCAM_PORT"`
 	AllowFrom          FlexibleStringSlice `json:"allow_from"           env:"PICOCLAW_CHANNELS_MAIXCAM_ALLOW_FROM"`
 	ReasoningChannelID string              `json:"reasoning_channel_id" env:"PICOCLAW_CHANNELS_MAIXCAM_REASONING_CHANNEL_ID"`
+}
+
+type ClawebConfig struct {
+	Enabled            bool                `json:"enabled"              env:"PICOCLAW_CHANNELS_CLAWEB_ENABLED"`
+	ListenHost         string              `json:"listen_host"          env:"PICOCLAW_CHANNELS_CLAWEB_LISTEN_HOST"`
+	ListenPort         int                 `json:"listen_port"          env:"PICOCLAW_CHANNELS_CLAWEB_LISTEN_PORT"`
+	AuthToken          string              `json:"auth_token"           env:"PICOCLAW_CHANNELS_CLAWEB_AUTH_TOKEN"`
+	AuthTokenFile      string              `json:"auth_token_file"      env:"PICOCLAW_CHANNELS_CLAWEB_AUTH_TOKEN_FILE"`
+	AllowFrom          FlexibleStringSlice `json:"allow_from"           env:"PICOCLAW_CHANNELS_CLAWEB_ALLOW_FROM"`
+	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
+	ReasoningChannelID string              `json:"reasoning_channel_id" env:"PICOCLAW_CHANNELS_CLAWEB_REASONING_CHANNEL_ID"`
 }
 
 type QQConfig struct {
@@ -497,6 +517,20 @@ type WeComAIBotConfig struct {
 	WelcomeMessage     string              `json:"welcome_message"              env:"PICOCLAW_CHANNELS_WECOM_AIBOT_WELCOME_MESSAGE"` // Sent on enter_chat event; empty = no welcome
 	ProcessingMessage  string              `json:"processing_message,omitempty" env:"PICOCLAW_CHANNELS_WECOM_AIBOT_PROCESSING_MESSAGE"`
 	ReasoningChannelID string              `json:"reasoning_channel_id"         env:"PICOCLAW_CHANNELS_WECOM_AIBOT_REASONING_CHANNEL_ID"`
+}
+
+type WeComOfficialConfig struct {
+	Enabled             bool                `json:"enabled"              env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_ENABLED"`
+	BotID               string              `json:"bot_id"               env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_BOT_ID"`
+	Secret              string              `json:"secret"               env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_SECRET"`
+	WebSocketURL        string              `json:"websocket_url"        env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_WEBSOCKET_URL"`
+	AllowFrom           FlexibleStringSlice `json:"allow_from"           env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_ALLOW_FROM"`
+	GroupTrigger        GroupTriggerConfig  `json:"group_trigger,omitempty"`
+	SendThinkingMessage *bool               `json:"sendThinkingMessage,omitempty"`
+	Placeholder         PlaceholderConfig   `json:"placeholder,omitempty"`
+	Card                CardConfig          `json:"card,omitempty"`
+	WelcomeMessage      string              `json:"welcome_message,omitempty" env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_WELCOME_MESSAGE"`
+	ReasoningChannelID  string              `json:"reasoning_channel_id" env:"PICOCLAW_CHANNELS_WECOM_OFFICIAL_REASONING_CHANNEL_ID"`
 }
 
 type PicoConfig struct {
@@ -904,6 +938,15 @@ func LoadConfig(path string) (*Config, error) {
 	if len(tmp.ModelList) > 0 {
 		cfg.ModelList = nil
 	}
+	if strings.Contains(string(data), `"api_key"`) && strings.Contains(string(data), `"muninndb"`) {
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, err
+		}
+		if legacyPath, ok := findLegacyMuninnAPIKeyPath(raw, nil); ok {
+			return nil, fmt.Errorf("legacy %s is no longer supported; use memory.muninndb.rest_api_key and memory.muninndb.mcp_api_key", legacyPath)
+		}
+	}
 
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, err
@@ -922,6 +965,9 @@ func LoadConfig(path string) (*Config, error) {
 	if err := env.Parse(cfg); err != nil {
 		return nil, err
 	}
+
+	cfg.Memory.ApplyDefaults()
+	cfg.Memory.ExpandEnvVars()
 
 	if err := resolveAPIKeys(cfg.ModelList, filepath.Dir(path)); err != nil {
 		return nil, err
@@ -951,8 +997,39 @@ func LoadConfig(path string) (*Config, error) {
 	if err := cfg.ValidateModelList(); err != nil {
 		return nil, err
 	}
+	EnsureMuninnMCPConfig(cfg)
+
+	if err := cfg.Memory.Validate(); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
+}
+
+func findLegacyMuninnAPIKeyPath(value any, path []string) (string, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			childPath := append(path, key)
+			if key == "muninndb" {
+				if nested, ok := child.(map[string]any); ok {
+					if _, exists := nested["api_key"]; exists {
+						return strings.Join(append(childPath, "api_key"), "."), true
+					}
+				}
+			}
+			if foundPath, ok := findLegacyMuninnAPIKeyPath(child, childPath); ok {
+				return foundPath, true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if foundPath, ok := findLegacyMuninnAPIKeyPath(child, path); ok {
+				return foundPath, true
+			}
+		}
+	}
+	return "", false
 }
 
 // encryptPlaintextAPIKeys returns a copy of models with plaintext api_key values

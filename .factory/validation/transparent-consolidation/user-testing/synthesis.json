@@ -1,0 +1,71 @@
+{
+  "milestone": "transparent-consolidation",
+  "status": "passed",
+  "updatedAt": "2026-03-20",
+  "vault": "default",
+  "surfaces": [
+    "claweb",
+    "live-muninn"
+  ],
+  "flows": [
+    {
+      "flowId": "claweb-consolidation-approved-evidence",
+      "report": ".factory/validation/transparent-consolidation/user-testing/flow-claweb-consolidation.json",
+      "assertions": [
+        "VAL-CONSOLIDATION-001",
+        "VAL-CONSOLIDATION-002",
+        "VAL-CONSOLIDATION-003",
+        "VAL-CONSOLIDATION-004",
+        "VAL-CROSS-002"
+      ]
+    }
+  ],
+  "evidenceSummary": {
+    "sameShellFrontdoor": "tmp/same-shell-frontdoor-start.log proves the accepted same-shell startup preserved CLAWEB_UPSTREAM_WS=ws://127.0.0.1:18999, CLAWEB_UPSTREAM_TOKEN=claweb-local-20260317, and the intended CLAWEB_LOGIN_CONFIG.",
+    "recoveryTranscript": "tmp/frontdoor-val-cross-002.log records the recovered assistant frame recovery-signal-20260320 through the allowed claweb surface.",
+    "recoveryLogs": "tmp/gateway-val-cross-002.log records muninn_auto_recall_hit on vault default with prompt_persist=false and concise memory injection on the recovered turn.",
+    "disruptionLogs": "tmp/worker-gateway.log records muninn_auto_recall_error from temporary rest endpoint failure at 127.0.0.1:18475 while the gateway remained alive.",
+    "acceptedReviews": [
+      ".factory/validation/transparent-consolidation/scrutiny/reviews/muninn-consolidation-why-and-cache-refresh.rerun.json",
+      ".factory/validation/transparent-consolidation/scrutiny/reviews/muninn-consolidation-conflict-handling-and-recovery.rerun.json"
+    ]
+  },
+  "assertionResults": {
+    "VAL-CONSOLIDATION-001": {
+      "status": "passed",
+      "evidence": [
+        "tmp/gateway-val-cross-002.log",
+        ".factory/validation/transparent-consolidation/scrutiny/reviews/muninn-consolidation-why-and-cache-refresh.rerun.json"
+      ]
+    },
+    "VAL-CONSOLIDATION-002": {
+      "status": "passed",
+      "evidence": [
+        ".factory/validation/transparent-consolidation/scrutiny/reviews/muninn-consolidation-why-and-cache-refresh.rerun.json"
+      ]
+    },
+    "VAL-CONSOLIDATION-003": {
+      "status": "passed",
+      "evidence": [
+        ".factory/validation/transparent-consolidation/scrutiny/reviews/muninn-consolidation-conflict-handling-and-recovery.rerun.json"
+      ]
+    },
+    "VAL-CONSOLIDATION-004": {
+      "status": "passed",
+      "evidence": [
+        "tmp/validator-gateway.log",
+        ".factory/validation/transparent-consolidation/scrutiny/reviews/muninn-consolidation-conflict-handling-and-recovery.rerun.json"
+      ]
+    },
+    "VAL-CROSS-002": {
+      "status": "passed",
+      "evidence": [
+        "tmp/worker-gateway.log",
+        "tmp/same-shell-frontdoor-start.log",
+        "tmp/frontdoor-val-cross-002.log",
+        "tmp/gateway-val-cross-002.log",
+        ".factory/validation/transparent-consolidation/scrutiny/reviews/muninn-consolidation-conflict-handling-and-recovery.rerun.json"
+      ]
+    }
+  }
+}

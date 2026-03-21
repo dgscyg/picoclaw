@@ -1,0 +1,93 @@
+{
+  "flowId": "claweb-consolidation-approved-evidence",
+  "milestone": "transparent-consolidation",
+  "surface": "claweb",
+  "vault": "default",
+  "status": "passed",
+  "assertions": [
+    "VAL-CONSOLIDATION-001",
+    "VAL-CONSOLIDATION-002",
+    "VAL-CONSOLIDATION-003",
+    "VAL-CONSOLIDATION-004",
+    "VAL-CROSS-002"
+  ],
+  "evidence": {
+    "sameShellFrontdoorStart": {
+      "file": "tmp/same-shell-frontdoor-start.log",
+      "details": [
+        "CLAWEB_UPSTREAM_WS=ws://127.0.0.1:18999",
+        "CLAWEB_UPSTREAM_TOKEN=claweb-local-20260317",
+        "CLAWEB_LOGIN_CONFIG=D:/tmp/claw/claweb/access/frontdoor/config/claweb-login.json"
+      ]
+    },
+    "frontdoorRecoveryRun": {
+      "file": "tmp/frontdoor-val-cross-002.log",
+      "details": [
+        "frontdoor listened on 127.0.0.1:18081 with loginConfig claweb-login.json",
+        "assistant_frame returned recovery-signal-20260320 after recovery turn"
+      ]
+    },
+    "gatewayRecoveryRun": {
+      "file": "tmp/gateway-val-cross-002.log",
+      "details": [
+        "startup shows inline MCP header path still unauthorized while claweb/gateway remained up",
+        "Muninn auto recall hit used vault=default with prompt_title=Relevant Memory (Muninn Auto-Recall), prompt_persist=false, and has_summary=true on the recovered turn",
+        "final response was recovery-signal-20260320"
+      ]
+    },
+    "disruptionRun": {
+      "file": "tmp/worker-gateway.log",
+      "details": [
+        "temporary failure used rest endpoint http://127.0.0.1:18475/api/activate",
+        "muninn_auto_recall_error recorded status=error with vault=default while the gateway continued answering"
+      ]
+    },
+    "historicalFlowSupport": {
+      "files": [
+        "tmp/validator-gateway.log",
+        "tmp/validator-frontdoor.log"
+      ],
+      "details": [
+        "capture and later recall of the teal validation fact occurred on the allowed claweb surface against vault default",
+        "frontdoor transcript includes assistant_frame outputs for remembered teal and nebula-helix-20260319"
+      ]
+    },
+    "scrutinyReruns": {
+      "files": [
+        ".factory/validation/transparent-consolidation/scrutiny/reviews/muninn-consolidation-why-and-cache-refresh.rerun.json",
+        ".factory/validation/transparent-consolidation/scrutiny/reviews/muninn-consolidation-conflict-handling-and-recovery.rerun.json"
+      ],
+      "details": [
+        "accepted rerun reviews mark both consolidation features as pass after the follow-up fix commit a8e50a8",
+        "the rerun specifically confirms paraphrased related-turn cache reuse, refresh on topic shifts, conflict handling, and approved-surface VAL-CROSS-002 recovery proof"
+      ]
+    }
+  },
+  "observations": [
+    {
+      "assertion": "VAL-CONSOLIDATION-001",
+      "result": "passed",
+      "because": "Recovered-turn gateway logs show prompt_title=Relevant Memory (Muninn Auto-Recall), prompt_persist=false, and has_summary=true, while scrutiny rerun accepted why-aware concise recall formatting rather than raw payload dumping."
+    },
+    {
+      "assertion": "VAL-CONSOLIDATION-002",
+      "result": "passed",
+      "because": "The accepted rerun review for muninn-consolidation-why-and-cache-refresh states that a8e50a8 broadened related-turn matching so paraphrased follow-ups reuse cached recall while topic shifts refresh."
+    },
+    {
+      "assertion": "VAL-CONSOLIDATION-003",
+      "result": "passed",
+      "because": "The accepted rerun review for muninn-consolidation-conflict-handling-and-recovery says the original feature implements conflict-aware recall filtering and conflict-note surfacing, with no remaining blocker."
+    },
+    {
+      "assertion": "VAL-CONSOLIDATION-004",
+      "result": "passed",
+      "because": "The same accepted rerun review confirms capture-triggered recall-cache invalidation and the validator logs show newly written teal and editor facts being recalled later in the same running claweb environment without restart."
+    },
+    {
+      "assertion": "VAL-CROSS-002",
+      "result": "passed",
+      "because": "worker-gateway.log records muninn_auto_recall_error against temporary endpoint 127.0.0.1:18475 during disruption, while same-shell frontdoor startup plus frontdoor-val-cross-002.log and gateway-val-cross-002.log show later recovery with assistant reply recovery-signal-20260320 and muninn_auto_recall_hit on vault default."
+    }
+  ]
+}

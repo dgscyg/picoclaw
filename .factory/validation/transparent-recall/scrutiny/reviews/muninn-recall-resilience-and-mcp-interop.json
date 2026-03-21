@@ -1,0 +1,33 @@
+{
+  "featureId": "muninn-recall-resilience-and-mcp-interop",
+  "reviewedAt": "2026-03-19T09:05:00Z",
+  "commitId": "66b604b89575516ce7c095c22dea4742da63d408",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The change correctly normalizes configured Muninn endpoints in config resolution and switches the HTTP MCP transport to streamable mode, but it does not actually satisfy the feature's required MCP coexistence behavior on the live split deployment. Evidence from the worker transcript and validator gateway log shows the runtime still tried to connect to http://127.0.0.1:8750 and failed with session not found, so manual mcp_muninn_* deepening remained unavailable despite the feature being marked complete.",
+    "issues": [
+      {
+        "file": "D:/tmp/claw/picoclaw/tmp/validator-gateway.log",
+        "line": 61,
+        "severity": "blocking",
+        "description": "Live evidence contradicts the feature's expected behavior: after this commit, MCP initialization still failed with \failed to connect ... session not found, and manual mcp_muninn_* tools were not available. The feature scope explicitly required PicoClaw to negotiate with the actual Muninn MCP listener and allow auto recall plus manual Muninn follow-up coexistence, so config-only normalization without a passing live interop proof is incomplete."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker marked the go-memory-worker procedure as followed, but the transcript and handoff show only config inspection plus port health checks for the manual MCP coexistence requirement; there was no successful same-run exercise of a manual mcp_muninn_* call after auto recall. The skill may need to emphasize that when live MCP interop is part of scope, port reachability alone is insufficient evidence.",
+      "evidence": "Worker transcript for session b07d2b54-d6c4-4d08-9a6b-9bd86c4b1864 shows health checks and tests, but no successful manual mcp_muninn_* runtime invocation; handoff interactiveChecks mention only boundary verification, while tmp/validator-gateway.log:61-63 still shows MCP init failure."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The repository library notes document the split REST/MCP deployment, but they do not record that even after switching to streamable HTTP transport the live Muninn listener still returned session not found during initialization. That operational limitation is actionable mission knowledge and should be captured for later workers instead of being rediscovered from logs.",
+      "evidence": "tmp/validator-gateway.log:61-63 records \failed to connect ... session not found; .factory/library/environment.md notes only that workers may need to normalize the mismatch, not that the live listener still rejects initialization after the attempted fix."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: commit 66b604b fixes config normalization but does not prove or deliver the required live MCP interoperability. Auto recall still worked, yet the live Muninn MCP connection continued to fail with session not found, leaving manual mcp_muninn_* coexistence unresolved."
+}

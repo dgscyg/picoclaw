@@ -1,0 +1,34 @@
+{
+  "featureId": "muninn-auto-capture-pipeline",
+  "reviewedAt": "2026-03-19T18:20:00Z",
+  "commitId": "2d47247baf7409cd0df5fe4e102b61306675215e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds a non-blocking post-turn Muninn capture hook with structured logging and tests, but its capture heuristics are too strict and miss explicit durable facts that the feature contract says should be captured automatically.",
+    "issues": [
+      {
+        "file": "pkg/agent/muninn_auto_capture.go",
+        "line": 234,
+        "severity": "blocking",
+        "description": "The candidate extractor rejects any message shorter than five words or lacking punctuation/28+ runes before semantic classification runs. That drops valid explicit durable facts like `Use pnpm.`, `Call me Alex.`, or `We use SQLite.` even though explicit constraints, contact mappings, and project decisions are supposed to be auto-captured."
+      },
+      {
+        "file": "pkg/agent/muninn_auto_capture.go",
+        "line": 27,
+        "severity": "blocking",
+        "description": "Constraint detection only matches messages that start with `do not`, `only`, `must`, `use`, etc. Requests phrased as explicit constraints later in the sentence—such as `For this repo, I prefer pnpm; please do not use yarn.` or `In this project we should only use pnpm.`—are missed unless they happen to satisfy the narrower decision/preference regexes. This leaves the pipeline short of reliably storing explicit constraints and project decisions."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `go-memory-worker` skill says workers should read `mission.md` and `validation-contract.md` first, but the reviewed transcript skeleton only shows README plus feature/handoff-oriented work and no reads of those mission artifacts before implementation/verification. The procedure may be under-enforced or the transcript skeleton may omit important reads.",
+      "evidence": "`worker-transcripts.jsonl` entry for workerSessionId `b3addb9c-1443-424a-ab15-571ac7cb6a46` does not show `mission.md` or `validation-contract.md` reads, while `.factory/skills/go-memory-worker/SKILL.md` step 1 explicitly requires them."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed handoff `2026-03-19T09-33-17-870Z__muninn-auto-capture-pipeline__b3addb9c-1443-424a-ab15-571ac7cb6a46.json`, commit `2d47247baf7409cd0df5fe4e102b61306675215e`, the transcript skeleton, and the go-memory-worker skill. The implementation correctly adds an asynchronous post-turn capture path and structured Muninn writes/logs, but it fails the feature contract because several plainly durable explicit constraints/contact mappings/decisions are filtered out by length/detail gates and overly narrow leading-pattern matching."
+}

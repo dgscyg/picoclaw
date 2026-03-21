@@ -138,6 +138,25 @@ func TestBM25SearchTool_Execute(t *testing.T) {
 	})
 }
 
+func TestBM25SearchTool_FindsSnakeCaseMCPToolNames(t *testing.T) {
+	reg := NewToolRegistry()
+	reg.RegisterHidden(&mockSearchableTool{
+		name: "mcp_armand_dl645t_control_ac_device",
+		desc: "[MCP:Armand_DL645T] Control an AC device over DL645T",
+	})
+
+	tool := NewBM25SearchTool(reg, 3, 10)
+	ctx := context.Background()
+
+	res := tool.Execute(ctx, map[string]any{"query": "control air conditioner HVAC device"})
+	if res.IsError {
+		t.Fatalf("unexpected error: %v", res.ForLLM)
+	}
+	if !strings.Contains(res.ForLLM, "mcp_armand_dl645t_control_ac_device") {
+		t.Fatalf("expected snake_case MCP tool in BM25 results, got: %s", res.ForLLM)
+	}
+}
+
 func TestRegexSearchTool_PatternTooLong(t *testing.T) {
 	reg := setupPopulatedRegistry()
 	tool := NewRegexSearchTool(reg, 5, 10)
