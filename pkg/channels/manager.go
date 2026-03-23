@@ -392,6 +392,10 @@ func (m *Manager) initChannels(channels *config.ChannelsConfig) error {
 		m.initChannel("wecom_app", "WeCom App")
 	}
 
+	if channels.Weixin.Enabled && channels.Weixin.Token != "" {
+		m.initChannel("weixin", "Weixin")
+	}
+
 	if channels.Pico.Enabled && channels.Pico.Token != "" {
 		m.initChannel("pico", "Pico")
 	}

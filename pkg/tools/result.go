@@ -1,6 +1,10 @@
 package tools
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/sipeed/picoclaw/pkg/providers"
+)
 
 // ToolResult represents the structured return value from tool execution.
 // It provides clear semantics for different types of results and supports
@@ -39,6 +43,11 @@ type ToolResult struct {
 	// user-facing result for the current conversation, so the agent should not
 	// continue generating an additional assistant reply for this turn.
 	ConsumesCurrentTurn bool `json:"consumes_current_turn,omitempty"`
+
+	// Messages holds the ephemeral session history after execution.
+	// Only populated by SubTurn executions; used by evaluator_optimizer
+	// to carry stateful worker context across evaluation iterations.
+	Messages []providers.Message `json:"-"`
 }
 
 // NewToolResult creates a basic ToolResult with content for the LLM.

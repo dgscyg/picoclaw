@@ -209,11 +209,12 @@ func (cb *ContextBuilder) InvalidateCache() {
 }
 
 func (cb *ContextBuilder) sourcePaths() []string {
-	paths := []string{filepath.Join(cb.workspace, "AGENTS.md"), filepath.Join(cb.workspace, "SOUL.md"), filepath.Join(cb.workspace, "USER.md"), filepath.Join(cb.workspace, "IDENTITY.md")}
+	agentDefinition := cb.LoadAgentDefinition()
+	paths := agentDefinition.trackedPaths(cb.workspace)
 	if !cb.muninnMode {
 		paths = append(paths, filepath.Join(cb.workspace, "memory", "MEMORY.md"))
 	}
-	return paths
+	return uniquePaths(paths)
 }
 
 func (cb *ContextBuilder) skillRoots() []string {
@@ -348,12 +349,32 @@ func skillFilesChangedSince(skillRoots []string, filesAtCache map[string]time.Ti
 }
 
 func (cb *ContextBuilder) LoadBootstrapFiles() string {
-	bootstrapFiles := []string{"AGENTS.md", "SOUL.md", "USER.md", "IDENTITY.md"}
 	var sb strings.Builder
-	for _, filename := range bootstrapFiles {
-		filePath := filepath.Join(cb.workspace, filename)
+
+	agentDefinition := cb.LoadAgentDefinition()
+	if agentDefinition.Agent != nil {
+		label := string(agentDefinition.Source)
+		if label == "" {
+			label = relativeWorkspacePath(cb.workspace, agentDefinition.Agent.Path)
+		}
+		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", label, agentDefinition.Agent.Body)
+	}
+	if agentDefinition.Soul != nil {
+		fmt.Fprintf(
+			&sb,
+			"## %s\n\n%s\n\n",
+			relativeWorkspacePath(cb.workspace, agentDefinition.Soul.Path),
+			agentDefinition.Soul.Content,
+		)
+	}
+	if agentDefinition.User != nil {
+		fmt.Fprintf(&sb, "## %s\n\n%s\n\n", "USER.md", agentDefinition.User.Content)
+	}
+
+	if agentDefinition.Source != AgentDefinitionSourceAgent {
+		filePath := filepath.Join(cb.workspace, "IDENTITY.md")
 		if data, err := os.ReadFile(filePath); err == nil {
-			fmt.Fprintf(&sb, "## %s\n\n%s\n\n", filename, data)
+			fmt.Fprintf(&sb, "## %s\n\n%s\n\n", "IDENTITY.md", data)
 		}
 	}
 	return sb.String()

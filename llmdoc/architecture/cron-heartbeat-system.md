@@ -37,7 +37,7 @@
 - **1. Initialization:** `cmd/picoclaw/internal/gateway/helpers.go:97-106` - Creates HeartbeatService with workspace, interval, enabled flag; sets handler and MessageBus.
 - **2. Loop:** `pkg/heartbeat/service.go:133-154` - `runLoop` with startup delay cap (30s), periodic execution per interval (min 5 min, default 30 min).
 - **3. Target Resolution:** `pkg/heartbeat/service.go:227-254` - `resolveTarget` gets last external channel from state, skips if recent activity (<15s grace period).
-- **4. Prompt Building:** `pkg/heartbeat/service.go:257-286` - `buildPrompt` reads workspace/HEARTBEAT.md, wraps with heartbeat context and current time.
+- **4. Prompt Building:** `pkg/heartbeat/service.go:257-286` - `buildPrompt` reads workspace/HEARTBEAT.md, preserves the template preamble, and extracts the user-maintained tasks section after `Add your heartbeat tasks below this line:` before wrapping it with heartbeat context and current time.
 - **5. Execution:** `pkg/heartbeat/service.go:156-225` - `executeHeartbeat` calls HeartbeatHandler (AgentLoop.ProcessHeartbeat), handles async/silent/error results.
 - **6. Response Delivery:** `pkg/heartbeat/service.go:324-357` - `sendResponse` publishes via MessageBus to last active channel.
 
