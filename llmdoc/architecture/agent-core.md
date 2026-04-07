@@ -7,12 +7,15 @@
 
 ## 2. Core Components
 
-- `pkg/agent/loop.go` (`AgentLoop`, `processMessage`, `runLLMIteration`): Central message processing loop handling inbound messages, tool execution, and LLM iteration with fallback chain.
-- `pkg/agent/loop.go` (`selectCandidates`, `runAgentLoop`): Model routing logic selecting between primary and light models based on message complexity scoring.
+- `pkg/agent/loop.go` (`AgentLoop`, `Run`, `processMessageDetailed`): Central message-processing entrypoint handling route resolution, same-scope steering drain, reply-aware final delivery, and round-scoped tool-send de-duplication.
+- `pkg/agent/loop.go` (`runAgentLoop`, `runTurn`, `publishResponseIfNeeded`): Turn shell plus full turn lifecycle, including hook execution, Muninn auto recall/capture integration, reply-aware final sends, and suppression of redundant assistant replies after direct tool delivery.
 - `pkg/agent/context.go` (`ContextBuilder`, `BuildMessages`, `BuildSystemPromptWithCache`): Constructs system prompts with mtime-based caching for performance optimization.
 - `pkg/agent/context.go` (`sanitizeHistoryForProvider`): History sanitization ensuring provider compatibility by removing orphaned tool messages.
 - `pkg/agent/instance.go` (`AgentInstance`, `NewAgentInstance`): Fully configured agent with workspace, session manager, context builder, tool registry, and model configuration.
 - `pkg/agent/registry.go` (`AgentRegistry`, `GetAgent`, `ResolveRoute`): Thread-safe registry managing multiple agent instances with routing support.
+- `pkg/agent/turn.go` (`turnState`, `turnResult`, `ActiveTurnInfo`): Per-turn lifecycle state, abort/restore bookkeeping, SubTurn parent-child tracking, and current-turn consumption signalling.
+- `pkg/agent/steering.go` (`dequeueSteeringMessagesForScope`, `Continue`): Queued same-session user steering and idle-turn continuation.
+- `pkg/agent/hooks.go` (`HookManager`): Before/after LLM and tool interception, approval, and event-linked control flow.
 - `pkg/agent/memory.go` (`MemoryStore`, `GetMemoryContext`): Persistent memory system with long-term storage and daily notes.
 - `pkg/agent/thinking.go` (`ThinkingLevel`, `parseThinkingLevel`): Provider thinking parameter configuration with levels: off, low, medium, high, xhigh, adaptive.
 
@@ -20,18 +23,18 @@
 
 ### Message Processing Flow
 
-- **1. Ingestion:** `AgentLoop.Run()` consumes inbound messages from `bus.MessageBus` via `al.bus.ConsumeInbound(ctx)` in `pkg/agent/loop.go:310-318`.
-- **2. Routing:** `processMessage()` calls `resolveMessageRoute()` to determine target agent via `registry.ResolveRoute()` in `pkg/agent/loop.go:635-654`.
-- **3. Context Building:** `runAgentLoop()` builds messages using `agent.ContextBuilder.BuildMessages()` with cached system prompt in `pkg/agent/loop.go:756-763`.
-- **4. LLM Iteration:** `runLLMIteration()` executes the LLM call loop with tool handling in `pkg/agent/loop.go:874-1272`.
-- **5. Tool Execution:** Parallel tool execution via `agent.Tools.ExecuteWithContext()` with async callback support in `pkg/agent/loop.go:1201-1209`.
-- **6. Response:** Final content returned and optionally published via `al.bus.PublishOutbound()` in `pkg/agent/loop.go:797-803`. If a tool result marks the current turn as already consumed, `runAgentLoop()` exits without publishing or storing an extra assistant reply.
+- **1. Ingestion:** `AgentLoop.Run()` consumes inbound messages from `bus.MessageBus`, then drains immediately queued same-scope inbound traffic into the steering queue while the active turn is running in `pkg/agent/loop.go:489` and `pkg/agent/steering.go:268-328`.
+- **2. Routing:** `processMessageDetailed()` resolves the target agent and session scope, normalizes template-card callbacks into user-history-safe text, and creates a round ID used by direct-send suppression in `pkg/agent/loop.go:1398`.
+- **3. Context Building:** `runTurn()` loads session history, injects dynamic prompt blocks from Muninn auto recall when enabled, and rebuilds messages after emergency compression in `pkg/agent/loop.go:1958`.
+- **4. Turn Execution:** `runTurn()` owns the full lifecycle: turn start/end events, graceful interrupt polling, steering injection, SubTurn result intake, LLM retries, and session restore on abort in `pkg/agent/loop.go:1958` and `pkg/agent/turn.go:42-110`.
+- **5. Tool Execution:** `runTurn()` executes provider-returned tool calls in order, wrapping each call with hook stages, `reply_to` routing context, user-message context, and round ID propagation before `ToolRegistry.ExecuteWithContext(...)` in `pkg/agent/loop.go:2586-2975`.
+- **6. Response:** `publishResponseIfNeeded()` and `sendFinalMessage()` publish the final answer only when no direct-send tool already consumed the turn; callback-aware channels still receive normalized `reply_to` on the final send in `pkg/agent/loop.go:205-257` and `pkg/agent/loop.go:730-772`.
 
 ### Context Building Flow
 
 - **1. Cache Check:** `BuildSystemPromptWithCache()` checks `sourceFilesChangedLocked()` for mtime changes in `pkg/agent/context.go:132-170`.
 - **2. Identity Assembly:** `getIdentity()` constructs base identity with workspace paths in `pkg/agent/context.go:72-95`.
-- **3. Bootstrap Loading:** `LoadBootstrapFiles()` reads AGENTS.md, SOUL.md, USER.md, IDENTITY.md in `pkg/agent/context.go:400-417`.
+- **3. Bootstrap Loading:** `LoadBootstrapFiles()` prefers `AGENT.md` / `AGENTS.md`, then `SOUL.md` and `USER.md`, and only falls back to legacy `IDENTITY.md` when the new per-workspace agent files are absent in `pkg/agent/context.go:351-419`.
 - **4. Skills Summary:** `skillsLoader.BuildSkillsSummary()` generates available skills list in `pkg/agent/context.go:110-117`.
 - **5. Memory Context:** `memory.GetMemoryContext()` retrieves long-term memory and recent daily notes in `pkg/agent/memory.go:134-158`.
 - **6. Dynamic Context:** `buildDynamicContext()` adds per-request time, runtime, session info in `pkg/agent/context.go:427-439`.
@@ -67,3 +70,7 @@ Two-tier storage for agent memory:
 - **Daily notes:** `memory/YYYYMM/YYYYMMDD.md` - time-based context
 
 Atomic writes with `fsync` ensure flash storage reliability.
+
+### Reply-Aware Direct Delivery
+
+`processOptions` carries per-turn `ReplyTo`, `RoundID`, `HistoryUserMessage`, and optional dynamic prompt blocks in `pkg/agent/loop.go:74-91`. This lets the merged agent core preserve platform callback semantics for `wecom_official`, de-duplicate direct `message` / `wecom_card` sends within one round, and still keep session history clean when callback payloads need a normalized user-facing representation.

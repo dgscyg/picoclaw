@@ -28,6 +28,7 @@ const (
 	defaultIntervalMinutes = 30
 	startupDelayCap        = 30 * time.Second
 	recentActivityGrace    = 15 * time.Second
+	userTasksMarker        = "Add your heartbeat tasks below this line:"
 )
 
 // HeartbeatHandler is the function type for handling heartbeat.
@@ -268,7 +269,7 @@ func (hs *HeartbeatService) buildPrompt() string {
 	}
 
 	content := string(data)
-	if len(content) == 0 {
+	if !heartbeatHasUserTasks(content) {
 		return ""
 	}
 
@@ -318,6 +319,32 @@ Add your heartbeat tasks below this line:
 	} else {
 		hs.logInfof("Created default HEARTBEAT.md template")
 	}
+}
+
+func heartbeatHasUserTasks(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+
+	markerIdx := strings.Index(content, userTasksMarker)
+	if markerIdx < 0 {
+		return true
+	}
+
+	tasksSection := content[markerIdx+len(userTasksMarker):]
+	for _, line := range strings.Split(tasksSection, "\n") {
+		trimmedLine := strings.TrimSpace(line)
+		if trimmedLine == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmedLine, "#") {
+			continue
+		}
+		return true
+	}
+
+	return false
 }
 
 // sendResponse sends the heartbeat response to the last channel

@@ -1,10 +1,12 @@
 {
   "agents": {
     "defaults": {
+      "log_level": "fatal",
       "workspace": "~/.picoclaw/workspace",
       "restrict_to_workspace": true,
       "model_name": "gpt-5.4",
       "max_tokens": 8192,
+      "context_window": 131072,
       "temperature": 0.7,
       "max_tool_iterations": 20,
       "summarize_message_threshold": 20,
@@ -256,6 +258,16 @@
         "title": "PicoClaw"
       },
       "welcome_message": "",
+      "reasoning_channel_id": ""
+    },
+    "weixin": {
+      "_comment": "Weixin iLink REST channel - poll inbound messages and reply with context_token continuity.",
+      "enabled": false,
+      "token": "YOUR_WEIXIN_TOKEN",
+      "base_url": "https://ilinkai.weixin.qq.com/",
+      "cdn_base_url": "https://novac2c.cdn.weixin.qq.com/c2c",
+      "proxy": "",
+      "allow_from": [],
       "reasoning_channel_id": ""
     },
     "pico": {
@@ -594,7 +606,16 @@
     "monitor_usb": true
   },
   "voice": {
+    "model_name": "",
     "echo_transcription": false
+  },
+  "hooks": {
+    "enabled": true,
+    "defaults": {
+      "observer_timeout_ms": 500,
+      "interceptor_timeout_ms": 5000,
+      "approval_timeout_ms": 60000
+    }
   },
   "gateway": {
     "host": "127.0.0.1",
